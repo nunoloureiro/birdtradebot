@@ -37,7 +37,7 @@ With the default rules, you split your available fiat funds to buy ETH and BTC w
         
         birdtradebot trade --profile <profile name> --rules <rules file>
         
-   , and enter the profile's password. Leave out the `--profile` to use the default profile, and leave out `--rules` to use the default `src/rules/birdpersonborg.py`. `birdtradebot` will listen for tweets that match the conditions from the rules in `vickirules.py` and perform the specified actions.
+   , and enter the profile's password. Leave out the `--profile` to use the default profile, and leave out `--rules` to use the default `rules/birdpersonborg.py`. `birdtradebot` will listen for tweets that match the conditions from the rules in `birdpersonborg.py` and perform the specified actions.
    If after a trade's been made, the "available to trade" line makes it look like currency vanished into thin air, don't fret; this probably means the trade hasn't completed yet. You can increase the sleep time after a trade is requested and before the "available to trade" line is displayed with `--sleep`.
 
 ## Contributing
