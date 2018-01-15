@@ -27,7 +27,7 @@ rules = [
             {
                 'side': 'sell',
                 'type': 'limit',
-                'price': '{inside_bid}',
+                'price': '{inside_ask}',
                 'product_id': 'ETH-BTC',
                 'size': '{available[ETH]}'
             }
