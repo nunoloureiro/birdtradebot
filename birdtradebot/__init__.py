@@ -114,7 +114,7 @@ def get_balance(gdax_client, status_update=False):
     for account in gdax_client.get_accounts():
         balance[account['currency']] = D(account['available'])
     if status_update:
-        balance_str = ', '.join('%s: %s' % (p, a) for p, a in balance.items())
+        balance_str = ', '.join('%s: %.8f' % (p, a) for p, a in balance.items())
         log.info('Current balance in wallet: %s' % balance_str)
     return balance
 
