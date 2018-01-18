@@ -296,8 +296,8 @@ class TradingStateMachine:
                     log.info("Order %s done: %s", ctxt['order_id'], r)
                     log.info("csv %s,%s,%s,%s,%s,%s,%s", 
                              r.get('done_at'), r.get('product_id'),
-                             r.get('position'), r.get('filled_size'), 
-                             r.get('price') if r.get('price') > 0 else 0, 
+                             ctxt['position'], r.get('filled_size'), 
+                             r.get('price'), 
                              r.get('executed_value'), r.get('type'))
                     self.available = get_balance(self.gdax, status_update=True)
                     continue

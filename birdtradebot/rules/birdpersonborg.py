@@ -46,7 +46,7 @@ rules = [
                 'type': 'limit',
                 'price': '{inside_bid}',
                 'product_id': 'ETH-EUR',
-                'size': '{split_balance}'
+                'size': '{max_balance}'
             }
         ]
     },
@@ -80,7 +80,7 @@ rules = [
                 'type': 'limit',
                 'price': '{inside_bid}',
                 'product_id': 'BTC-EUR',
-                'size': '{split_balance}'
+                'size': '{max_balance}'
             }
         ]
     },
