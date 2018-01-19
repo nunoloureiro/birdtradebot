@@ -115,6 +115,7 @@ def get_balance(gdax_client, status_update=False):
         balance[account['currency']] = D(account['available'])
     if status_update:
         balance_str = ', '.join('%s: %.8f' % (p, a) for p, a in balance.items())
+        # TODO: print csv log:  csv <datetime>,balance,<eur>,<bch>,<btc>,<ltc>
         log.info('Current balance in wallet: %s' % balance_str)
     return balance
 
@@ -299,6 +300,7 @@ class TradingStateMachine:
                              ctxt['position'], r.get('filled_size'), 
                              r.get('price'), 
                              r.get('executed_value'), r.get('type'))
+                    # TODO: csv of the balance: TS,balance,<eur>,<bch>,<btc>,<eth>,<ltc>
                     self.available = get_balance(self.gdax, status_update=True)
                     continue
                 elif now < ctxt['retry_expiration']:
@@ -489,6 +491,7 @@ class TradingStateMachine:
         if order['side'] == 'buy':
             order['size'] = self._calc_buy_size(
                 ctxt, asset, base_asset, inside_ask, inside_bid, price)
+            # TODO: If order size < 0.000010 don't place the order
             log.info('Placing order: %s' % order)
             r = self.gdax.buy(**order)
             r = self._check_funds(r, base_asset, order)
