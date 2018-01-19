@@ -17,10 +17,7 @@ You'll need some keys and secrets and passcodes from Twitter and GDAX. `birdtrad
 5. Create an API key with permissions to view and trade. You should now see a key, secret, and passphrase. Don't close the tab, or you'll lose the secret forever---which isn't the end of the world; you'll just have to regenerate an API key.
 
 ## Install and configure `birdtradebot`
-1. Run
-
-        pip install birdtradebot
-   ...or clone the repo, `cd` into it, `pip install` the required packages python-dateutil,  [`twython`](https://github.com/ryanmcgrath/twython), [`gdax`](https://github.com/danpaquin/GDAX-Python), and [`pycrypto`](https://pypi.python.org/pypi/pycrypto), and precede all `birdtradebot` commands below with `python`. Your choice.
+1. Clone the repo, `cd` into it, `pip install` the required packages `python-dateutil`,  [`twython`](https://github.com/ryanmcgrath/twython), [`gdax`](https://github.com/danpaquin/GDAX-Python), and [`pycrypto`](https://pypi.python.org/pypi/pycrypto), and precede all `birdtradebot` commands below with `python3`. Your choice.
 2. Configure `birdtradebot` by running
 
         birdtradebot configure
