@@ -18,6 +18,7 @@ import getpass
 import base64
 import json
 import decimal
+import datetime
 
 from copy import deepcopy
 
@@ -102,7 +103,7 @@ def prettify_dict(rule):
                         indent=4, separators=(',', ': '))
 
 
-def get_balance(gdax_client, status_update=False):
+def get_balance(gdax_client, status_update=False, status_csv=False):
     """ Retrieve balance in user accounts
 
         gdax_client: instance of gdax.AuthenticatedClient
@@ -115,8 +116,18 @@ def get_balance(gdax_client, status_update=False):
         balance[account['currency']] = D(account['available'])
     if status_update:
         balance_str = ', '.join('%s: %.8f' % (p, a) for p, a in balance.items())
-        # TODO: print csv log:  csv <datetime>,balance,<eur>,<bch>,<btc>,<ltc>
         log.info('Current balance in wallet: %s' % balance_str)
+    if status_csv:
+        currentDT = datetime.datetime.now()
+        # csv log:  csv <datetime>,balance,<eur>,<bch>,<btc>,<ltc>
+        balance_csv = "%s, balance, EUR-ETH-BTC-BCH-LTC ,%s, %s, %s, %s, %s" % (currentDT.strftime("%Y-%m-%d %H:%M:%S"),
+            '%.8f' % balance['EUR'],
+            '%.8f' % balance['ETH'],
+            '%.8f' % balance['BTC'],
+            '%.8f' % balance['BCH'],
+            '%.8f' % balance['LTC'])
+        log.info('csv %s' % balance_csv)
+
     return balance
 
 
@@ -300,8 +311,7 @@ class TradingStateMachine:
                              ctxt['position'], r.get('filled_size'), 
                              r.get('price'), 
                              r.get('executed_value'), r.get('type'))
-                    # TODO: csv of the balance: TS,balance,<eur>,<bch>,<btc>,<eth>,<ltc>
-                    self.available = get_balance(self.gdax, status_update=True)
+                    self.available = get_balance(self.gdax, status_update=True, status_csv=True)
                     continue
                 elif now < ctxt['retry_expiration']:
                     log.debug("Pending order %s has not yet expired: %s",
@@ -567,7 +577,7 @@ class TradingStateMachine:
             now = time.time()
             self._run()
             if now > next_status_ts:
-                self.available = get_balance(self.gdax, status_update=True)
+                self.available = get_balance(self.gdax, status_update=True, status_csv=True)
                 next_status_ts = now + 3600
             time.sleep(120)
 
