@@ -102,6 +102,16 @@ def prettify_dict(rule):
     return json.dumps(rule, sort_keys=False,
                         indent=4, separators=(',', ': '))
 
+def get_price(gdax_client, pair):
+    """ Retrieve bid price for a pair
+
+        gdax_client: instance of gdax.AuthenticatedClient
+        pair: The pair that we want to know the price
+
+        Return value: string with the pair bid price
+    """
+    order_book = gdax_client.get_product_order_book(pair)
+    return D(order_book['bids'][0][0])
 
 def get_balance(gdax_client, status_update=False, status_csv=False):
     """ Retrieve balance in user accounts
@@ -119,13 +129,14 @@ def get_balance(gdax_client, status_update=False, status_csv=False):
         log.info('Current balance in wallet: %s' % balance_str)
     if status_csv:
         currentDT = datetime.datetime.now()
-        # csv log:  csv <datetime>,balance,<eur>,<bch>,<btc>,<ltc>
-        balance_csv = "%s, balance, EUR-ETH-BTC-BCH-LTC ,%s, %s, %s, %s, %s" % (currentDT.strftime("%Y-%m-%d %H:%M:%S"),
+        # TODO - do this log for the pairs we are trading (retrieved from rules)
+        balance_csv = "%s, balance, EUR-ETH-BTC, %s, %s, %s, bids, BTC-EUR ETH-EUR ETH-BTC, %s, %s, %s" % (currentDT.strftime("%Y-%m-%d %H:%M:%S"),
             '%.8f' % balance['EUR'],
             '%.8f' % balance['ETH'],
             '%.8f' % balance['BTC'],
-            '%.8f' % balance['BCH'],
-            '%.8f' % balance['LTC'])
+            '%s' % get_price(gdax_client, 'BTC-EUR'),
+            '%s' % get_price(gdax_client, 'ETH-EUR'),
+            '%s' % get_price(gdax_client, 'ETH-BTC'))
         log.info('csv %s' % balance_csv)
 
     return balance
@@ -477,7 +488,6 @@ class TradingStateMachine:
                 log.error("Could not cancel order: %s", ctxt['order_id'])
                 ctxt['status'] = 'error'
                 return ctxt
-
         order_book = self.public_client.get_product_order_book(ctxt['pair'])
         inside_bid = D(order_book['bids'][0][0])
         inside_ask = D(order_book['asks'][0][0])
