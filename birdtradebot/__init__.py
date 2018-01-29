@@ -317,11 +317,11 @@ class TradingStateMachine:
                     ctxt['position'] = \
                         'long' if ctxt['order']['side'] == 'buy' else 'short'
                     log.info("Order %s done: %s", ctxt['order_id'], r)
-                    log.info("csv %s,%s,%s,%s,%s,%s,%s", 
+                    log.info("csv %s,%s,%s,%s,%s,%s,%s,%s", 
                              r.get('done_at'), r.get('product_id'),
-                             ctxt['position'], r.get('filled_size'), 
+                             r.get('side'), r.get('filled_size'), 
                              r.get('price'), 
-                             r.get('executed_value'), r.get('type'))
+                             r.get('executed_value'), r.get('type'), r.get('status'), r.get('fill_fees'))
                     self.available = get_balance(self.gdax, status_update=True, status_csv=True)
                     continue
                 elif now < ctxt['retry_expiration']:
