@@ -529,11 +529,11 @@ class TradingStateMachine:
             r = self.gdax.sell(**order)
             r = self._check_funds(r, base_asset, order)
 
-        log.info("csv %s,%s,%s,%s,%s,%s,%s,%s",
+        log.info("csv %s,%s,%s,%s,%s,,%s,%s",
                  datetime.datetime.now(), order['product_id'],
                  order['side'], order['size'],
                  order['price'],
-                 order['executed_value'], order['type'], ctxt['status'])
+                 order['type'], ctxt['status'])
         log.info('Order placed. Server reply: %s', r)
         time.sleep(self.sleep_time)
 
