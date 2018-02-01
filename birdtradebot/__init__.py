@@ -424,8 +424,8 @@ class TradingStateMachine:
                         "Current balance (%s) == previous balance (%s). "
                         "Will try decreasing buy amount...",
                         base_asset_amount, self.available[base_asset])
-            order['size'] = round_down(
-                D(orig_order_size) * (D('0.999') - D(i) * D('0.002')))
+            order['size'] = str(round_down(
+                D(orig_order_size) * (D('0.999') - D(i) * D('0.002'))))
 
             log.info("Fallback: order: %s", order)
             r = self.gdax.buy(**order)
@@ -484,7 +484,7 @@ class TradingStateMachine:
                 max_balance=max_balance
             ))
 
-        return round_down(size)
+        return str(round_down(size))
 
     def _calc_sell_size(self, ctxt, ask, bid):
         order = ctxt['order']
@@ -493,7 +493,7 @@ class TradingStateMachine:
                 inside_bid=bid,
                 available=self.available
             ))
-        return round_down(size)
+        return str(round_down(size))
 
     def _place_order(self, ctxt):
         # Ensure that there is no pending order for this context.
