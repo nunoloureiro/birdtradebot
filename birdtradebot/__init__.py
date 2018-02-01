@@ -59,8 +59,8 @@ try:
     from Crypto import Random
 except ImportError as e:
     e.message = (
-        'birdtradebot requires PyCrypto. Install it with '
-        '"pip install pycrypto".'
+        'birdtradebot requires PyCryptodome. Install it with '
+        '"pip install pycryptodome".'
     )
     raise
 
