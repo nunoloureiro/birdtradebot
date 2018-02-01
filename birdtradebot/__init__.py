@@ -609,13 +609,19 @@ class TradingStateMachine:
 
     def run(self):
         next_status_ts = 0
+        sleep_seconds = 120
         while True:
             now = time.time()
-            self._run()
-            if now > next_status_ts:
-                self.available = get_balance(self.gdax, status_update=True, status_csv=True)
-                next_status_ts = now + 3600
-            time.sleep(120)
+            try:
+                self._run()
+            except TwythonError as te:
+                log.warning("Error fetching Twitter messages: %s. "
+                            "Will retry in %d s...", te, sleep_seconds)
+            else:
+                if now > next_status_ts:
+                    self.available = get_balance(self.gdax, status_update=True, status_csv=True)
+                    next_status_ts = now + 3600
+            time.sleep(sleep_seconds)
 
 
 def go():
@@ -1013,5 +1019,4 @@ def go():
         while True:
             log.info('Waiting for trades; hit CTRL+C to quit...')
             trader.run()
-            log.info('Rate limit error. Restarting in %d s...' % args.interval)
             time.sleep(args.interval)
