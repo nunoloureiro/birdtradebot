@@ -555,7 +555,13 @@ class TradingStateMachine:
             ctxt['order_id'] = r['id']
             ctxt['status'] = r['status']
         else:
-            ctxt['status'] = 'error'
+            msg = r.get('message')
+            if msg is not None and 'order size is too small' in msg.lower():
+                msg.warning("Cannot place order because size is too small. "
+                            "Order: %s, Server reply: %s", order, r)
+                ctxt['status'] = 'expired'
+            else:
+                ctxt['status'] = 'error'
 
         return ctxt
 
