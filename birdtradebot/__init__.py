@@ -331,7 +331,7 @@ class TradingStateMachine:
                     ctxt['position'] = \
                         'long' if ctxt['order']['side'] == 'buy' else 'short'
                     log.info("Order %s done: %s", ctxt['order_id'], r)
-                    log.info("csv %s,%s,%s,%s,%s,%s,%s,%s", 
+                    log.info("csv %s,%s,%s,%s,%s,%s,%s,%s, %s", 
                              r.get('done_at'), r.get('product_id'),
                              r.get('side'), r.get('filled_size'), 
                              r.get('price'), 
