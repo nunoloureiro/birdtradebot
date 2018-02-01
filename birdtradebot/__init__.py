@@ -23,8 +23,8 @@ import datetime
 from copy import deepcopy
 
 from decimal import Decimal as D
+from math import floor
 
-decimal.getcontext().prec = 8
 decimal.getcontext().rounding = decimal.ROUND_DOWN
 
 # For 2-3 compatibility
@@ -102,6 +102,12 @@ def prettify_dict(rule):
     return json.dumps(rule, sort_keys=False,
                         indent=4, separators=(',', ': '))
 
+
+def round_down(n, d=8):
+    d = int('1' + ('0' * d))
+    return floor(n * d) / d
+
+
 def get_price(gdax_client, pair):
     """ Retrieve bid price for a pair
 
@@ -112,6 +118,7 @@ def get_price(gdax_client, pair):
     """
     order_book = gdax_client.get_product_order_book(pair)
     return D(order_book['bids'][0][0])
+
 
 def get_balance(gdax_client, status_update=False, status_csv=False):
     """ Retrieve balance in user accounts
@@ -125,18 +132,25 @@ def get_balance(gdax_client, status_update=False, status_csv=False):
     for account in gdax_client.get_accounts():
         balance[account['currency']] = D(account['available'])
     if status_update:
-        balance_str = ', '.join('%s: %.8f' % (p, a) for p, a in balance.items())
+        balance_str = ', '.join('%s: %s' % (p, round_down(a))
+                                for p, a in balance.items())
         log.info('Current balance in wallet: %s' % balance_str)
     if status_csv:
-        currentDT = datetime.datetime.now()
+        now = datetime.datetime.now()
         # TODO - do this log for the pairs we are trading (retrieved from rules)
-        balance_csv = "%s, balance, EUR-ETH-BTC, %s, %s, %s, bids, BTC-EUR ETH-EUR ETH-BTC, %s, %s, %s" % (currentDT.strftime("%Y-%m-%d %H:%M:%S"),
-            '%.8f' % balance['EUR'],
-            '%.8f' % balance['ETH'],
-            '%.8f' % balance['BTC'],
-            '%s' % get_price(gdax_client, 'BTC-EUR'),
-            '%s' % get_price(gdax_client, 'ETH-EUR'),
-            '%s' % get_price(gdax_client, 'ETH-BTC'))
+        balance_csv = (
+            "%s, balance, EUR-ETH-BTC, %s, %s, %s, bids, "
+            "BTC-EUR ETH-EUR ETH-BTC, %s, %s, %s"
+        )
+        balance_csv = balance_csv % (
+            now.strftime("%Y-%m-%d %H:%M:%S"),
+            round_down(balance['EUR']),
+            round_down(balance['ETH']),
+            round_down(balance['BTC']),
+            get_price(gdax_client, 'BTC-EUR'),
+            get_price(gdax_client, 'ETH-EUR'),
+            get_price(gdax_client, 'ETH-BTC')
+        )
         log.info('csv %s' % balance_csv)
 
     return balance
@@ -410,8 +424,8 @@ class TradingStateMachine:
                         "Current balance (%s) == previous balance (%s). "
                         "Will try decreasing buy amount...",
                         base_asset_amount, self.available[base_asset])
-            order['size'] = \
-                '%.8f' % (D(orig_order_size) * (D('0.999') - D(i) * D('0.002')))
+            order['size'] = round_down(
+                D(orig_order_size) * (D('0.999') - D(i) * D('0.002')))
 
             log.info("Fallback: order: %s", order)
             r = self.gdax.buy(**order)
@@ -469,7 +483,8 @@ class TradingStateMachine:
                 available=self.available,
                 max_balance=max_balance
             ))
-        return '%.8f' % size
+
+        return round_down(size)
 
     def _calc_sell_size(self, ctxt, ask, bid):
         order = ctxt['order']
@@ -478,7 +493,7 @@ class TradingStateMachine:
                 inside_bid=bid,
                 available=self.available
             ))
-        return '%.8f' % size
+        return round_down(size)
 
     def _place_order(self, ctxt):
         # Ensure that there is no pending order for this context.
@@ -527,7 +542,6 @@ class TradingStateMachine:
             order['size'] = self._calc_sell_size(ctxt, inside_ask, inside_bid)
             log.info('Placing order: %s' % order)
             r = self.gdax.sell(**order)
-            r = self._check_funds(r, base_asset, order)
 
         log.info("csv %s,%s,%s,%s,%s,,%s,%s",
                  datetime.datetime.now(), order['product_id'],
