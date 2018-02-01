@@ -404,7 +404,7 @@ class TradingStateMachine:
             contexts.append(new_pair_context(rule, order, tweet))
         return contexts
 
-    def _check_funds(self, r, base_asset, order):
+    def _check_buy_funds(self, r, base_asset, order):
         orig_order_size = order['size']
         for i in range(5):
             try:
@@ -447,7 +447,7 @@ class TradingStateMachine:
                 continue
             if c['position'] == 'long':
                 continue
-            # TODO: check if this is right. It depends on wether GDAX updates
+            # TODO: check if this is right. It depends on whether GDAX updates
             # the balance as orders are being placed or not
             if c['position'] == 'short':  # and c['status'] == 'settled' ?
                 short_pairs.append(c['pair'])
@@ -526,10 +526,10 @@ class TradingStateMachine:
         if order['side'] == 'buy':
             order['size'] = self._calc_buy_size(
                 ctxt, asset, base_asset, inside_ask, inside_bid, price)
-            # TODO: If order size < 0.000010 don't place the order
             log.info('Placing order: %s' % order)
             r = self.gdax.buy(**order)
-            r = self._check_funds(r, base_asset, order)
+            r = self._check_buy_funds(r, base_asset, order)
+
         else:
             assert order['side'] == 'sell'
             if self.available[asset] == 0:
