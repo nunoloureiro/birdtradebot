@@ -194,7 +194,8 @@ def twitter_handles_to_userids(twitter, handles):
         try:
             ids_map[handle] = twitter.show_user(screen_name=handle)['id_str']
         except TwythonError as e:
-            if 'User not found' in e.message:
+            msg = getattr(e, 'message', None)
+            if msg is not None and 'User not found' in msg:
                 log.warning('Handle %s not found; skipping rule...' % handle)
             else:
                 raise
@@ -607,7 +608,7 @@ class TradingStateMachine:
             try:
                 self._run()
             except TwythonError as te:
-                log.warning("Error fetching Twitter messages: %s. "
+                log.warning("Error fetching Twitter status: %s. "
                             "Will retry in %d s...", te, sleep_seconds)
             else:
                 if now > next_status_ts:
