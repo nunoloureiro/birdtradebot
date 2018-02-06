@@ -558,7 +558,7 @@ class TradingStateMachine:
         else:
             msg = r.get('message')
             if msg is not None and 'order size is too small' in msg.lower():
-                msg.warning("Cannot place order because size is too small. "
+                log.warning("Cannot place order because size is too small. "
                             "Order: %s, Server reply: %s", order, r)
                 ctxt['status'] = 'expired'
             else:
