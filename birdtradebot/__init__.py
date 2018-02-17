@@ -354,9 +354,8 @@ class TradingStateMachine:
             elif ctxt['market_fallback'] and ctxt['order']['type'] == 'limit':
                 log.info("No more retries left, but market fallback is "
                          "enabled. Retrying one last time as market taker.")
-                ctxt['order']['type'] = 'market'
                 ctxt['retry_expiration'] = now + ctxt['retry_ttl']
-                self._place_order(ctxt)
+                self._place_order(ctxt, _type='market')
             else:
                 log.warning("Order context expired. No more retries: %s", ctxt)
                 ctxt['status'] = 'expired'
@@ -496,7 +495,7 @@ class TradingStateMachine:
             ))
         return str(round_down(size))
 
-    def _place_order(self, ctxt):
+    def _place_order(self, ctxt, _type=None):
         # Ensure that there is no pending order for this context.
         if ctxt['status'] == 'pending':
             reply = self.gdax.cancel_order(ctxt['order_id'])
@@ -510,6 +509,8 @@ class TradingStateMachine:
 
         # Create a new order from the order template
         order = deepcopy(ctxt['order'])
+        if _type is not None:
+            order['type'] = _type
         ctxt['order_instance'] = order
         order['price'] = '%.2f' % eval(order['price'].format(
             inside_bid=inside_bid,
