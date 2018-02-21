@@ -35,7 +35,7 @@ rules = [
    },
    {
         'handles': ['BirdpersonBorg'],
-        'condition': '"ETHUSD" in {tweet} and "long" in {tweet}.lower()',
+        'condition': '"ETHEUR" in {tweet} and "long" in {tweet}.lower()',
         'retries': 1,
         'retry_ttl_s': 300,
         'tweet_ttl_s': 600,
@@ -52,7 +52,7 @@ rules = [
     },
     {
         'handles': ['BirdpersonBorg'],
-        'condition': '"ETHUSD" in {tweet} and "short" in {tweet}.lower()',
+        'condition': '"ETHEUR" in {tweet} and "short" in {tweet}.lower()',
         'retries': 1,
         'retry_ttl_s': 300,
         'tweet_ttl_s': 600,
