@@ -323,6 +323,7 @@ class TradingStateMachine:
             if ctxt['status'] in ('settled', 'expired'):
                 continue
 
+            order_instance = ctxt.get('order_instance')
             if ctxt['status'] == 'pending':
                 r = self.gdax.get_order(ctxt['order_id'])
                 log.debug("Fetched order %s status: %s", ctxt['order_id'], r)
@@ -341,17 +342,18 @@ class TradingStateMachine:
                     continue
                 elif now < ctxt['retry_expiration']:
                     log.debug("Pending order %s has not yet expired: %s",
-                              ctxt['order_id'], ctxt['order_instance'])
+                              ctxt['order_id'], order_instance)
                     continue
                 else:
                     log.info("Pending order expired. Tries left: %d, details: %s",
-                             ctxt['tries_left'], ctxt['order_instance'])
+                             ctxt['tries_left'], order_instance)
 
             if ctxt['tries_left'] > 0:
                 ctxt['tries_left'] -= 1
                 ctxt['retry_expiration'] = now + ctxt['retry_ttl']
                 self._place_order(ctxt)
-            elif ctxt['market_fallback'] and ctxt['order']['type'] == 'limit':
+            elif (ctxt['market_fallback'] and order_instance is not None and
+                  order_instance['type'] == 'limit'):
                 log.info("No more retries left, but market fallback is "
                          "enabled. Retrying one last time as market taker.")
                 ctxt['retry_expiration'] = now + ctxt['retry_ttl']
