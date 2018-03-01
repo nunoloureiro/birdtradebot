@@ -514,7 +514,7 @@ class TradingStateMachine:
         if _type is not None:
             order['type'] = _type
         ctxt['order_instance'] = order
-        order['price'] = '%.2f' % eval(order['price'].format(
+        order['price'] = '%f' % eval(order['price'].format(
             inside_bid=inside_bid,
             inside_ask=inside_ask
         ))
