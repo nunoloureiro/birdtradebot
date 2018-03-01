@@ -351,11 +351,14 @@ class TradingStateMachine:
             if ctxt['tries_left'] > 0:
                 ctxt['tries_left'] -= 1
                 ctxt['retry_expiration'] = now + ctxt['retry_ttl']
+                ctxt['order']['post_only'] = True
                 self._place_order(ctxt)
             elif (ctxt['market_fallback'] and order_instance is not None and
                   order_instance['type'] == 'limit'):
                 log.info("No more retries left, but market fallback is "
                          "enabled. Retrying one last time as market taker.")
+                ctxt['order']['type'] = 'market'
+                ctxt['order']['post_only'] = False
                 ctxt['retry_expiration'] = now + ctxt['retry_ttl']
                 self._place_order(ctxt, _type='market')
             else:
