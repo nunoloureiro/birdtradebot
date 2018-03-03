@@ -312,7 +312,7 @@ class TradingStateMachine:
                 "Order state does not allow to apply short rules: %s", ctxt)
             return
 
-        # "early_exit" is specifies how much profit should we gain, before
+        # "early_exit" specifies how much profit should we gain, before
         # exiting the current position.
         early_exit = ctxt.get('early_exit')
         if early_exit is None:
@@ -493,10 +493,23 @@ class TradingStateMachine:
         if pair and int(new_id) > int(pair_id):
             state['pairs'][pair]['id'] = new_id
 
+    def _cancel_order(self, order_id):
+        if order_id is None:
+            return
+        log.info('Found previous order %s. Cancelling (if valid)...', order_id)
+        reply = self.gdax.cancel_order(order_id)
+        log.info('Server reply to order cancel request: %s', reply)
+        # Wait a few of seconds for the order to be cancelled
+        time.sleep(3)
+
     def _get_pair_contexts(self, tweet, rule):
         contexts = []
         for order in rule['orders']:
-            contexts.append(new_pair_context(rule, order, tweet))
+            ctxt = new_pair_context(rule, order, tweet)
+            if ctxt['order_id'] is not None:
+                self._cancel_order(ctxt['order_id'])
+                ctxt['order_id'] = None
+            contexts.append(ctxt)
         return contexts
 
     def _check_buy_funds(self, r, base_asset, order):
@@ -617,13 +630,8 @@ class TradingStateMachine:
     def _place_order(self, ctxt, _type=None, order=None):
         # Ensure that there is no pending order for this context.
         if ctxt['order_id'] is not None:
-            log.info(
-                'Found previous order id %s. Cancelling (if still valid)',
-                ctxt['order_id'])
-            reply = self.gdax.cancel_order(ctxt['order_id'])
-            log.info('Server reply to order cancel request: %s', reply)
-            # Wait a few of seconds for the order to be cancelled
-            time.sleep(3)
+            self._cancel_order(ctxt['order_id'])
+            ctxt['order_id'] = None
 
         order = order if order is not None else deepcopy(ctxt['order'])
         order = self._build_order(order, ctxt['pair'], ctxt)
@@ -704,6 +712,8 @@ class TradingStateMachine:
                     continue
 
                 log.debug("Updating context %s with %s", ctxt, new_ctxt)
+                order_id = ctxt[pair]['order_id']
+                new_ctxt['order_id'] = order_id
                 ctxts[pair] = new_ctxt
 
     def run(self):
