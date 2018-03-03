@@ -712,7 +712,7 @@ class TradingStateMachine:
                     continue
 
                 log.debug("Updating context %s with %s", ctxt, new_ctxt)
-                order_id = ctxt[pair]['order_id']
+                order_id = ctxt['order_id']
                 new_ctxt['order_id'] = order_id
                 ctxts[pair] = new_ctxt
 
