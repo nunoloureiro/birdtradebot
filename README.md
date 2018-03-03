@@ -1,8 +1,8 @@
-# birdtradebot v0.2.0
+# birdtradebot v0.3.0
 
 This bot is originally based on vickitrix bot (https://github.com/nellore/vickitrix), but heavily modified to become more robust and to support new rules.
 
-`birdtradebot` trades on GDAX according to rules based on tweets. Trading involves 2 main components: 1) defines the strategy and provides advice to open or close a position; 2) places the orders and manages the wallets. This bot provides the latter, it listens on twitter for advice and places orders based on that advice. Placing orders and managing wallets is actually more complex than what it sounds and we believe there's still a lot of potential for improvement.
+`birdtradebot` trades on GDAX and Bitfinex according to rules based on tweets. Trading involves 2 main components: 1) defines the strategy and provides advice to open or close a position; 2) places the orders and manages the wallets. This bot provides the latter, it listens on twitter for advice and places orders based on that advice. Placing orders and managing wallets is actually more complex than what it sounds and we believe there's still a lot of potential for improvement.
 
 ## Preliminaries
 

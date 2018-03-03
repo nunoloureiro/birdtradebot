@@ -3,31 +3,36 @@
 birdtradebot
 
 Checks tweets and
-uses rules specified in file to make market trades on GDAX using
-https://github.com/danpaquin/GDAX-Python. Default rules are stored in 
+uses rules specified in file to make market trades on exchanges using
+the GDAX API. Default rules are stored in
 rules/birdpersonborg.py and follow the tweets of @birdpersonborg.
 """
 from __future__ import print_function
 
-import sys
-import os
-import errno
-import time
 import argparse
-import getpass
 import base64
-import json
-import decimal
 import datetime
+import decimal
+import errno
+import getpass
+import json
+import os
+import sys
+import time
+
+# Might be used in rules
+import math
+import re
 
 from copy import deepcopy
-
 from decimal import Decimal as D
 from math import floor
 
+from exchanges import bitfinex
+
 decimal.getcontext().rounding = decimal.ROUND_DOWN
 
-# For 2-3 compatibility
+# For 2-3 compatibilityx
 try:
     input = raw_input
 except NameError:
@@ -41,6 +46,14 @@ try:
 except ImportError as e:
     e.message = (
          'birdtradebot requires GDAX-Python. Install it with "pip install gdax".'
+        )
+    raise
+
+try:
+    import ccxt
+except ImportError as e:
+    e.message = (
+         'birdtradebot requires ccxt. Install it with "pip install ccxt".'
         )
     raise
 
@@ -74,7 +87,6 @@ except ImportError as e:
     raise
 
 # In case user wants to use regular expressions on conditions/funds
-import re
 import logging
 
 logging.basicConfig(
@@ -85,6 +97,14 @@ log.setLevel(logging.DEBUG)
 
 logging.getLogger("requests").setLevel(logging.WARNING)
 logging.getLogger("urllib3").setLevel(logging.WARNING)
+
+
+PRICE_PRECISION = {
+    'ETH-EUR': 2,
+    'BTC-EUR': 5,
+    'ETH-BTC': 6,
+    'IOT-USD': 5,
+}
 
 
 def help_formatter(prog):
@@ -111,7 +131,7 @@ def round_down(n, d=8):
 def get_price(gdax_client, pair):
     """ Retrieve bid price for a pair
 
-        gdax_client: instance of gdax.AuthenticatedClient
+        gdax_client: any object implementing the GDAX API
         pair: The pair that we want to know the price
 
         Return value: string with the pair bid price
@@ -123,7 +143,7 @@ def get_price(gdax_client, pair):
 def get_balance(gdax_client, status_update=False, status_csv=False):
     """ Retrieve balance in user accounts
 
-        gdax_client: instance of gdax.AuthenticatedClient
+        gdax_client: any object implementing the GDAX API
         status_update: True iff status update should be printed
 
         Return value: dictionary mapping currency to account information
@@ -135,23 +155,23 @@ def get_balance(gdax_client, status_update=False, status_csv=False):
         balance_str = ', '.join('%s: %s' % (p, round_down(a))
                                 for p, a in balance.items())
         log.info('Current balance in wallet: %s' % balance_str)
-    if status_csv:
-        now = datetime.datetime.now()
-        # TODO - do this log for the pairs we are trading (retrieved from rules)
-        balance_csv = (
-            "%s, balance, EUR-ETH-BTC, %s, %s, %s, bids, "
-            "BTC-EUR ETH-EUR ETH-BTC, %s, %s, %s"
-        )
-        balance_csv = balance_csv % (
-            now.strftime("%Y-%m-%d %H:%M:%S"),
-            round_down(balance['EUR']),
-            round_down(balance['ETH']),
-            round_down(balance['BTC']),
-            get_price(gdax_client, 'BTC-EUR'),
-            get_price(gdax_client, 'ETH-EUR'),
-            get_price(gdax_client, 'ETH-BTC')
-        )
-        log.info('csv %s' % balance_csv)
+#    if status_csv:
+#        now = datetime.datetime.now()
+#        # TODO - do this log for the pairs we are trading (retrieved from rules)
+#        balance_csv = (
+#            "%s, balance, EUR-ETH-BTC, %s, %s, %s, bids, "
+#            "BTC-EUR ETH-EUR ETH-BTC, %s, %s, %s"
+#        )
+#        balance_csv = balance_csv % (
+#            now.strftime("%Y-%m-%d %H:%M:%S"),
+#            round_down(balance['EUR']),
+#            round_down(balance['ETH']),
+#            round_down(balance['BTC']),
+#            get_price(gdax_client, 'BTC-EUR'),
+#            get_price(gdax_client, 'ETH-EUR'),
+#            get_price(gdax_client, 'ETH-BTC')
+#        )
+#        log.info('csv %s' % balance_csv)
 
     return balance
 
@@ -245,6 +265,8 @@ def new_pair_context(rule, order, tweet):
         'order': order,
         'order_id': None,
         'order_instance': None,
+        'order_result': None,
+        'order_next_check': 0,
 
         'handle': tweet['user']['screen_name'],
         'tweet_date': tweet['created_at'],
@@ -254,6 +276,7 @@ def new_pair_context(rule, order, tweet):
         'status': None,
         'tries_left': retries + 1,
         'market_fallback': rule.get('market_fallback', False),
+        'early_exit': rule.get('early_exit'),
         'retry_ttl': retry_ttl,
         'retry_expiration': 0,
         'expiration': created + tweet_ttl,
@@ -267,11 +290,12 @@ def new_pair_context(rule, order, tweet):
 
     return pair
 
+
 class TradingStateMachine:
     """ Trades on GDAX based on tweets. """
 
-    def __init__(self, rules, gdax_client, twitter_client, handles, state,
-                 sleep_time=0.5):
+    def __init__(self, rules, gdax_client, public_client, twitter_client,
+                 handles, state, sleep_time=0.5):
         self.rules = rules
         self.gdax = gdax_client
         self.twitter = twitter_client
@@ -280,7 +304,57 @@ class TradingStateMachine:
         self.state = state.d
         self.sleep_time = sleep_time
         self.available = get_balance(self.gdax, status_update=False)
-        self.public_client = gdax.PublicClient() # for product order book
+        self.public_client = public_client
+
+    def _post_short_actions(self, ctxt):
+        if ctxt['status'] != 'settled' or ctxt['position'] != 'short':
+            log.warning(
+                "Order state does not allow to apply short rules: %s", ctxt)
+            return
+
+        # "early_exit" is specifies how much profit should we gain, before
+        # exiting the current position.
+        early_exit = ctxt.get('early_exit')
+        if early_exit is None:
+            return
+        if early_exit.get('type') != 'short':
+            return
+        exit_size = early_exit.get('size')
+        if exit_size is None:
+            return
+        exit_profit = early_exit.get('profit')
+        if exit_profit is None:
+            return
+        sell_result = ctxt.get('order_result')
+        if sell_result is None:
+            log.warning("Could not determine previous order result: %s", ctxt)
+            return
+
+        executed_value = sell_result.get('executed_value')
+        price = sell_result.get('price')
+        if executed_value is not None and price is not None:
+            sell_price = D(executed_value) / D(sell_result['size'])
+        elif price is not None:
+            sell_price = D(price)
+        else:
+            log.warning('Could not determine sell price : %s', sell_result)
+            return
+
+        exit_size = D(exit_size)
+        exit_profit = D(exit_profit)
+        buy_price = sell_price - sell_price * exit_profit
+        buy_size = sell_price * exit_size / buy_price
+        precision = PRICE_PRECISION.get(ctxt['pair'], 2)
+        order = {
+            'side': 'buy',
+            'type': 'limit',
+            'post_only': True,
+            'price': str(round_down(buy_price, precision)),
+            'product_id': ctxt['order']['product_id'],
+            'size': str(round_down(buy_size))
+        }
+        log.info("Placing buy back order: %s", order)
+        self._place_order(ctxt, order=order)
 
     def _run(self):
         twitter_state = self.state['twitter']
@@ -320,15 +394,28 @@ class TradingStateMachine:
 
             now = int(time.time())
 
-            if ctxt['status'] in ('settled', 'expired'):
+            if ctxt['status'] == 'expired':
+                continue
+            elif ctxt['status'] == 'settled':
+                if ctxt['order_id'] is None or ctxt['position'] != 'short':
+                    continue
+                if now < ctxt['order_next_check']:
+                    continue
+                ctxt['order_next_check'] = now + 1800
+                r = self.gdax.get_order(ctxt['order_id'])
+                log.debug(
+                    "Fetched rebuy order %s details: %s", ctxt['order_id'], r)
+                if r and r.get('status') == 'done':
+                    ctxt['order_id'] = None
+
                 continue
 
             order_instance = ctxt.get('order_instance')
-            if ctxt['status'] == 'pending':
+            if ctxt['status'] in ('pending', 'open'):
                 r = self.gdax.get_order(ctxt['order_id'])
-                log.debug("Fetched order %s status: %s", ctxt['order_id'], r)
+                log.debug("Fetched order %s details: %s", ctxt['order_id'], r)
 
-                if r.get('status') in ('done', 'settled'):
+                if r.get('status') == 'done' and r['settled']:
                     ctxt['status'] = 'settled'
                     ctxt['position'] = \
                         'long' if ctxt['order']['side'] == 'buy' else 'short'
@@ -339,11 +426,17 @@ class TradingStateMachine:
                              r.get('price'), 
                              r.get('executed_value'), r.get('type'), r.get('status'), r.get('fill_fees'))
                     self.available = get_balance(self.gdax, status_update=True, status_csv=True)
+                    ctxt['order_id'] = None
+                    ctxt['order_result'] = r
+                    if ctxt['position'] == 'short':
+                        self._post_short_actions(ctxt)
                     continue
+
                 elif now < ctxt['retry_expiration']:
                     log.debug("Pending order %s has not yet expired: %s",
                               ctxt['order_id'], order_instance)
                     continue
+
                 else:
                     log.info("Pending order expired. Tries left: %d, details: %s",
                              ctxt['tries_left'], order_instance)
@@ -434,13 +527,11 @@ class TradingStateMachine:
             log.info('Fallback: server reply: %s', r)
             time.sleep(self.sleep_time)
 
-        log.debug("Fallback: done.")
+        log.debug("Fallback: finished.")
 
         return r
 
-    def _calc_buy_size(self, ctxt, asset, base_asset, ask, bid, price):
-        order = ctxt['order']
-
+    def _calc_buy_size(self, order, _, base_asset, ask, bid):
         short_pairs = []
         for c in self.state['gdax']['contexts'].values():
             # Only makes sense for pairs with the same base asset
@@ -474,6 +565,7 @@ class TradingStateMachine:
 
         log.debug("The following pairs are short: %s", short_pairs)
         n_short_pairs = len(short_pairs)
+        price = order['price']
         if order['size'] == '{split_balance}':
             size = self.available[base_asset] / D(n_short_pairs) / D(price)
         else:
@@ -488,8 +580,7 @@ class TradingStateMachine:
 
         return str(round_down(size))
 
-    def _calc_sell_size(self, ctxt, ask, bid):
-        order = ctxt['order']
+    def _calc_sell_size(self, order, ask, bid):
         size = eval(order['size'].format(
                 inside_ask=ask,
                 inside_bid=bid,
@@ -497,53 +588,64 @@ class TradingStateMachine:
             ))
         return str(round_down(size))
 
-    def _place_order(self, ctxt, _type=None):
-        # Ensure that there is no pending order for this context.
-        if ctxt['status'] == 'pending':
-            reply = self.gdax.cancel_order(ctxt['order_id'])
-            if reply is None or 'error' in reply:
-                log.error("Could not cancel order: %s", ctxt['order_id'])
-                ctxt['status'] = 'error'
-                return ctxt
-        order_book = self.public_client.get_product_order_book(ctxt['pair'])
+    def _build_order(self, order, pair, ctxt):
+        asset, base_asset = pair.split('-')
+        order_book = self.public_client.get_product_order_book(pair)
         inside_bid = D(order_book['bids'][0][0])
         inside_ask = D(order_book['asks'][0][0])
-
-        # Create a new order from the order template
-        order = deepcopy(ctxt['order'])
-        if _type is not None:
-            order['type'] = _type
-        ctxt['order_instance'] = order
-        order['price'] = '%.2f' % eval(order['price'].format(
+        precision = PRICE_PRECISION.get(pair, 2)
+        price = D(eval(order['price'].format(
             inside_bid=inside_bid,
-            inside_ask=inside_ask
-        ))
-        price = order['price']
-        # Refresh balance
-        self.available = get_balance(self.gdax, status_update=True)
-
-        asset, base_asset = ctxt['pair'].split('-')
-
-        if order['type'] == 'market' and 'price' in order:
-            del order['price']
-
+            inside_ask=inside_ask)))
+        order['price'] = str(round_down(price, precision))
         if order['side'] == 'buy':
             order['size'] = self._calc_buy_size(
-                ctxt, asset, base_asset, inside_ask, inside_bid, price)
-            log.info('Placing order: %s' % order)
-            r = self.gdax.buy(**order)
-            r = self._check_buy_funds(r, base_asset, order)
-
-        else:
-            assert order['side'] == 'sell'
+                order, asset, base_asset, inside_ask, inside_bid)
+        elif order['side'] == 'sell':
             if self.available[asset] == 0:
                 log.debug("Trying to go short with no available funds. "
                           "Finish order: %s", order)
                 ctxt['status'] = 'settled'
                 ctxt['position'] = 'short'
-                return ctxt
+                return None
+            order['size'] = self._calc_sell_size(order, inside_ask, inside_bid)
+        else:
+            raise RuntimeError("Unrecognized order side: %s", order['side'])
 
-            order['size'] = self._calc_sell_size(ctxt, inside_ask, inside_bid)
+        return order
+
+    def _place_order(self, ctxt, _type=None, order=None):
+        # Ensure that there is no pending order for this context.
+        if ctxt['order_id'] is not None:
+            log.info(
+                'Found previous order id %s. Cancelling (if still valid)',
+                ctxt['order_id'])
+            reply = self.gdax.cancel_order(ctxt['order_id'])
+            log.info('Server reply to order cancel request: %s', reply)
+            # Wait a few of seconds for the order to be cancelled
+            time.sleep(3)
+
+        order = order if order is not None else deepcopy(ctxt['order'])
+        order = self._build_order(order, ctxt['pair'], ctxt)
+        if order is None:
+            return
+
+        if _type is not None:
+            order['type'] = _type
+        ctxt['order_instance'] = order
+        if order['type'] == 'market':
+            if 'price' in order:
+                del order['price']
+            if 'post_only' in order:
+                del order['post_only']
+
+        asset, base_asset = ctxt['pair'].split('-')
+        self.available = get_balance(self.gdax, status_update=True)
+        if order['side'] == 'buy':
+            log.info('Placing order: %s' % order)
+            r = self.gdax.buy(**order)
+            r = self._check_buy_funds(r, base_asset, order)
+        else:
             log.info('Placing order: %s' % order)
             r = self.gdax.sell(**order)
 
@@ -557,7 +659,8 @@ class TradingStateMachine:
 
         if 'id' in r:
             ctxt['order_id'] = r['id']
-            ctxt['status'] = r['status']
+            if ctxt['status'] != 'settled':
+                ctxt['status'] = r['status']
         else:
             msg = r.get('message')
             if msg is not None and 'order size is too small' in msg.lower():
@@ -666,6 +769,10 @@ def go():
             default=0.5,
             help='how long to wait (in s) after an order has been placed'
         )
+    trade_parser.add_argument('--state', type=str, required=False,
+            default='state.dat',
+            help='state file; this is where the bot keeps its runtime state'
+        )
     args = parser.parse_args()
     key_dir = os.path.join(os.path.expanduser('~'), '.birdtradebot')
     if args.subparser_name == 'configure':
@@ -751,7 +858,7 @@ def go():
                             token,
                             ' (AES256-encrypted using profile password): ',
                             base64.b64encode(iv + cipher.encrypt(
-                                unencoded_and_not_to_be_written_to_disk
+                                unencoded_and_not_to_be_written_to_disk.encode()
                             )).decode()]), file=config_stream)
             for line in previous_lines_to_write:
                 print(line, file=config_stream)
@@ -985,16 +1092,26 @@ def go():
             handles.update(rule['handles'])
             keywords.update(rule['keywords'])
 
+        exchange = os.getenv('EXCHANGE')
+        exchanges = {
+                'bitfinex': bitfinex.GDAXInterfaceAdapter
+        }
         try:
             # Instantiate GDAX and Twitter clients
-            gdax_client = gdax.AuthenticatedClient(*keys_and_secrets[:3])
             twitter_client = Twython(*keys_and_secrets[3:7])
+            if exchange is None:
+                gdax_client = gdax.AuthenticatedClient(*keys_and_secrets[:3])
+                public_client = gdax.PublicClient()  # for product order book
+            else:
+                gdax_client = exchanges[exchange](*keys_and_secrets[:3])
+                public_client = gdax_client
 
             # Are they working?
             get_balance(gdax_client, status_update=True)
-            state = State('state.dat')
-            trader = TradingStateMachine(rules, gdax_client, twitter_client,
-                                         handles, state, sleep_time=args.sleep)
+            state = State(args.state)
+            trader = TradingStateMachine(
+                rules, gdax_client, public_client, twitter_client,
+                handles, state, sleep_time=args.sleep)
 
         except Exception:
             from traceback import format_exc
