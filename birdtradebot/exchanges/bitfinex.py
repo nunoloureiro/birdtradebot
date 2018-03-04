@@ -115,7 +115,7 @@ def convert_bitfinex_order_reply_to_gdax(order):
     }
     price = raw_reply.get('price')
     if price is not None:
-        reply['executed_value'] = D(raw_reply['executed_amount']) * D(price)
+        reply['executed_value'] = str(D(raw_reply['executed_amount']) * D(price))
         reply['price'] = str(price)
 
     return reply

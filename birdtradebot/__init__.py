@@ -306,12 +306,15 @@ class TradingStateMachine:
         self.available = get_balance(self.gdax, status_update=False)
         self.public_client = public_client
 
-    def _post_short_actions(self, ctxt):
+    def _do_post_short_tasks(self, ctxt):
         if ctxt['status'] != 'settled' or ctxt['position'] != 'short':
             log.warning(
                 "Order state does not allow to apply short rules: %s", ctxt)
             return
 
+        self._set_early_exit(ctxt)
+
+    def _set_early_exit(self, ctxt):
         # "early_exit" specifies how much profit should we gain, before
         # exiting the current position.
         early_exit = ctxt.get('early_exit')
@@ -429,7 +432,7 @@ class TradingStateMachine:
                     ctxt['order_id'] = None
                     ctxt['order_result'] = r
                     if ctxt['position'] == 'short':
-                        self._post_short_actions(ctxt)
+                        self._do_post_short_tasks(ctxt)
                     continue
 
                 elif now < ctxt['retry_expiration']:
