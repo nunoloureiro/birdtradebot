@@ -85,13 +85,13 @@ def convert_gdax_order_to_bitfinex(gdax_order):
     return order
 
 
-def convert_bitfinex_order_reply_to_gdax(order):
-    if order is None:
+def convert_bitfinex_order_reply_to_gdax(reply):
+    if reply is None:
         return None
-    if 'info' in order:
-        raw_reply = order['info']
+    if 'info' in reply:
+        raw_reply = reply['info']
     else:
-        raw_reply = order
+        raw_reply = reply
 
     if raw_reply['is_live']:
         status = 'pending'
@@ -103,7 +103,7 @@ def convert_bitfinex_order_reply_to_gdax(order):
         status = 'done'
         settled = D(raw_reply['remaining_amount']) == D('0.0')
 
-    reply = {
+    result = {
             'id': raw_reply['id'],
             'size': raw_reply['executed_amount'],
             'product_id': convert_raw_pair_to_gdax(raw_reply['symbol']),
@@ -111,14 +111,15 @@ def convert_bitfinex_order_reply_to_gdax(order):
             'type': convert_raw_type_to_gdax(raw_reply['type']),
             'status': status,
             'settled': settled,
-            'created_at': order.get('datetime'),
+            'created_at': reply.get('datetime'),
+            'bitfinex_reply': raw_reply
     }
     price = raw_reply.get('price')
     if price is not None:
-        reply['executed_value'] = str(D(raw_reply['executed_amount']) * D(price))
-        reply['price'] = str(price)
+        result['executed_value'] = str(D(raw_reply['executed_amount']) * D(price))
+        result['price'] = str(price)
 
-    return reply
+    return result
 
 
 class GDAXInterfaceAdapter:
