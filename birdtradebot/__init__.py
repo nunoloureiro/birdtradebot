@@ -101,8 +101,8 @@ logging.getLogger("urllib3").setLevel(logging.WARNING)
 
 PRICE_PRECISION = {
     'ETH-EUR': 2,
-    'BTC-EUR': 5,
-    'ETH-BTC': 6,
+    'BTC-EUR': 2,
+    'ETH-BTC': 5,
     'IOT-USD': 5,
 }
 
