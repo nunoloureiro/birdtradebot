@@ -514,10 +514,10 @@ class TradingStateMachine:
         if _type is not None:
             order['type'] = _type
         ctxt['order_instance'] = order
-        order['price'] = eval(order['price'].format(
+        order['price'] = str(eval(order['price'].format(
             inside_bid=inside_bid,
             inside_ask=inside_ask
-        ))
+        )))
         price = order['price']
         # Refresh balance
         self.available = get_balance(self.gdax, status_update=True)
