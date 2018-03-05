@@ -335,8 +335,9 @@ class TradingStateMachine:
 
         executed_value = sell_result.get('executed_value')
         price = sell_result.get('price')
-        if executed_value is not None and price is not None:
-            sell_price = D(executed_value) / D(sell_result['size'])
+        size = sell_result.get('size')
+        if executed_value is not None and size is not None:
+            sell_price = D(executed_value) / D(size)
         elif price is not None:
             sell_price = D(price)
         else:
