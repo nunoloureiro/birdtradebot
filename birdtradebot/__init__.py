@@ -403,7 +403,7 @@ class TradingStateMachine:
             elif ctxt['status'] == 'settled':
                 if ctxt['order_id'] is None or ctxt['position'] != 'short':
                     continue
-                if now < ctxt['order_next_check']:
+                if now < ctxt.get('order_next_check'):
                     continue
                 ctxt['order_next_check'] = now + 1800
                 r = self.gdax.get_order(ctxt['order_id'])
