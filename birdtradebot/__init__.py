@@ -276,6 +276,7 @@ def new_pair_context(rule, order, tweet):
         'status': None,
         'tries_left': retries + 1,
         'market_fallback': rule.get('market_fallback', False),
+        'cancel_expired': rule.get('cancel_expired', False),
         'early_exit': rule.get('early_exit'),
         'retry_ttl': retry_ttl,
         'retry_expiration': 0,
@@ -372,6 +373,39 @@ class TradingStateMachine:
         if r and r.get('status') == 'done':
             ctxt['order_id'] = None
 
+    def _handle_expired_limit_order(self, ctxt, now):
+        if ctxt['market_fallback']:
+            log.info("No more retries left, but market fallback is "
+                     "enabled. Retrying one last time as market taker.")
+            ctxt['retry_expiration'] = now + ctxt['retry_ttl']
+            self._place_order(ctxt, _type='market')
+            return
+
+        cancel = ctxt.get('cancel_expired', False)
+        status_msg = ", but will be kept until new tweet arrives"
+        if cancel:
+            status_msg = " and cancelled"
+            self._cancel_order(ctxt['order_id'])
+            ctxt['order_id'] = None
+
+        log.warning("Limit order expired%s: %s", status_msg, ctxt)
+        ctxt['status'] = 'expired'
+
+    def _handle_settled_order(self, ctxt, r):
+        ctxt['status'] = 'settled'
+        ctxt['position'] = 'long' if ctxt['order']['side'] == 'buy' else 'short'
+        log.info("Order %s done: %s", ctxt['order_id'], r)
+        log.info("csv %s,%s,%s,%s,%s,%s,%s,%s, %s",
+                 r.get('done_at'), r.get('product_id'), r.get('side'),
+                 r.get('filled_size'), r.get('price'), r.get('executed_value'),
+                 r.get('type'), r.get('status'), r.get('fill_fees'))
+        self.available = get_balance(self.gdax, status_update=True,
+                                     status_csv=True)
+        ctxt['order_id'] = None
+        ctxt['order_result'] = r
+        if ctxt['position'] == 'short':
+            self._do_post_short_tasks(ctxt)
+
     def _run(self):
         twitter_state = self.state['twitter']
         gdax_state = self.state['gdax']
@@ -417,25 +451,17 @@ class TradingStateMachine:
                 continue
 
             order_instance = ctxt.get('order_instance')
+            try:
+                limit_order = order_instance['type'] == 'limit'
+            except (TypeError, KeyError):
+                limit_order = False
+
             if ctxt['status'] in ('pending', 'open'):
                 r = self.gdax.get_order(ctxt['order_id'])
                 log.debug("Fetched order %s details: %s", ctxt['order_id'], r)
 
                 if r.get('status') == 'done' and r['settled']:
-                    ctxt['status'] = 'settled'
-                    ctxt['position'] = \
-                        'long' if ctxt['order']['side'] == 'buy' else 'short'
-                    log.info("Order %s done: %s", ctxt['order_id'], r)
-                    log.info("csv %s,%s,%s,%s,%s,%s,%s,%s, %s", 
-                             r.get('done_at'), r.get('product_id'),
-                             r.get('side'), r.get('filled_size'), 
-                             r.get('price'), 
-                             r.get('executed_value'), r.get('type'), r.get('status'), r.get('fill_fees'))
-                    self.available = get_balance(self.gdax, status_update=True, status_csv=True)
-                    ctxt['order_id'] = None
-                    ctxt['order_result'] = r
-                    if ctxt['position'] == 'short':
-                        self._do_post_short_tasks(ctxt)
+                    self._handle_settled_order(ctxt, r)
                     continue
 
                 elif now < ctxt['retry_expiration']:
@@ -451,14 +477,10 @@ class TradingStateMachine:
                 ctxt['tries_left'] -= 1
                 ctxt['retry_expiration'] = now + ctxt['retry_ttl']
                 self._place_order(ctxt)
-            elif (ctxt['market_fallback'] and order_instance is not None and
-                  order_instance['type'] == 'limit'):
-                log.info("No more retries left, but market fallback is "
-                         "enabled. Retrying one last time as market taker.")
-                ctxt['retry_expiration'] = now + ctxt['retry_ttl']
-                self._place_order(ctxt, _type='market')
+            elif limit_order:
+                self._handle_expired_limit_order(ctxt, now)
             else:
-                log.warning("Order context expired. No more retries: %s", ctxt)
+                log.warning("Market order expired: %s", ctxt)
                 ctxt['status'] = 'expired'
 
         self.state_obj.save()
