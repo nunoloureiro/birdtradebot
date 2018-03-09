@@ -360,7 +360,7 @@ class TradingStateMachine:
         log.info("Placing buy back order: %s", order)
         self._place_order(ctxt, order=order)
 
-    def _check_early_exit_order_status(self, ctxt, now):
+    def _check_early_exit_status(self, ctxt, now):
         if ctxt['order_id'] is None or ctxt['position'] != 'short':
             return
         if now < ctxt.get('order_next_check', 0):
