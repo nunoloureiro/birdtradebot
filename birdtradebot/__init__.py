@@ -140,7 +140,7 @@ def get_price(gdax_client, pair):
     except KeyError:
         return 'NA'
 
-    return D(order_book['bids'][0][0])
+    return D(str(order_book['bids'][0][0]))
 
 
 def get_balance(gdax_client, status_update=False, status_csv=False):
@@ -634,8 +634,8 @@ class TradingStateMachine:
     def _build_order(self, order, pair, ctxt):
         asset, base_asset = pair.split('-')
         order_book = self.public_client.get_product_order_book(pair)
-        inside_bid = D(order_book['bids'][0][0])
-        inside_ask = D(order_book['asks'][0][0])
+        inside_bid = D(str(order_book['bids'][0][0]))
+        inside_ask = D(str(order_book['asks'][0][0]))
         precision = PRICE_PRECISION.get(pair, 2)
         price = D(eval(order['price'].format(
             inside_bid=inside_bid,
