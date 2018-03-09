@@ -133,10 +133,13 @@ def get_price(gdax_client, pair):
 
         gdax_client: any object implementing the GDAX API
         pair: The pair that we want to know the price
-
         Return value: string with the pair bid price
     """
-    order_book = gdax_client.get_product_order_book(pair)
+    try:
+        order_book = gdax_client.get_product_order_book(pair)
+    except KeyError:
+        return 'NA'
+
     return D(order_book['bids'][0][0])
 
 
@@ -155,23 +158,23 @@ def get_balance(gdax_client, status_update=False, status_csv=False):
         balance_str = ', '.join('%s: %s' % (p, round_down(a))
                                 for p, a in balance.items())
         log.info('Current balance in wallet: %s' % balance_str)
-#    if status_csv:
-#        now = datetime.datetime.now()
-#        # TODO - do this log for the pairs we are trading (retrieved from rules)
-#        balance_csv = (
-#            "%s, balance, EUR-ETH-BTC, %s, %s, %s, bids, "
-#            "BTC-EUR ETH-EUR ETH-BTC, %s, %s, %s"
-#        )
-#        balance_csv = balance_csv % (
-#            now.strftime("%Y-%m-%d %H:%M:%S"),
-#            round_down(balance['EUR']),
-#            round_down(balance['ETH']),
-#            round_down(balance['BTC']),
-#            get_price(gdax_client, 'BTC-EUR'),
-#            get_price(gdax_client, 'ETH-EUR'),
-#            get_price(gdax_client, 'ETH-BTC')
-#        )
-#        log.info('csv %s' % balance_csv)
+    if status_csv:
+        now = datetime.datetime.now()
+        # TODO - do this log for the pairs we are trading (retrieved from rules)
+        balance_csv = (
+            "%s, balance, EUR-ETH-BTC, %s, %s, %s, bids, "
+            "BTC-EUR ETH-EUR ETH-BTC, %s, %s, %s"
+        )
+        balance_csv = balance_csv % (
+            now.strftime("%Y-%m-%d %H:%M:%S"),
+            round_down(balance['EUR']),
+            round_down(balance['ETH']),
+            round_down(balance['BTC']),
+            get_price(gdax_client, 'BTC-EUR'),
+            get_price(gdax_client, 'ETH-EUR'),
+            get_price(gdax_client, 'ETH-BTC')
+        )
+        log.info('csv %s' % balance_csv)
 
     return balance
 
@@ -392,7 +395,6 @@ class TradingStateMachine:
         ctxt['status'] = 'expired'
 
     def _handle_settled_order(self, ctxt, r):
-        ctxt['status'] = 'settled'
         ctxt['position'] = 'long' if ctxt['order']['side'] == 'buy' else 'short'
         log.info("Order %s done: %s", ctxt['order_id'], r)
         log.info("csv %s,%s,%s,%s,%s,%s,%s,%s, %s",
