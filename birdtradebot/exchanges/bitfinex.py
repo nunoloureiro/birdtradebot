@@ -130,8 +130,12 @@ class GDAXInterfaceAdapter:
         self.bitfinex = ccxt.bitfinex({'apiKey': key, 'secret': secret})
 
     def get_product_order_book(self, pair):
-        r = self.bitfinex.fetch_order_book(convert_pair_from_gdax(pair), limit=1)
-        return r
+        try:
+            r = self.bitfinex.fetch_order_book(convert_pair_from_gdax(pair), limit=1)
+        except ccxt.ExchangeError:
+            raise KeyError
+        else:
+            return r
 
     @handle_errors
     def get_accounts(self):
