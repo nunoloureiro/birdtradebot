@@ -360,6 +360,18 @@ class TradingStateMachine:
         log.info("Placing buy back order: %s", order)
         self._place_order(ctxt, order=order)
 
+    def _check_early_exit_order_status(self, ctxt, now):
+        if ctxt['order_id'] is None or ctxt['position'] != 'short':
+            return
+        if now < ctxt.get('order_next_check', 0):
+            return
+        ctxt['order_next_check'] = now + 1800
+        r = self.gdax.get_order(ctxt['order_id'])
+        log.debug(
+            "Fetched rebuy order %s details: %s", ctxt['order_id'], r)
+        if r and r.get('status') == 'done':
+            ctxt['order_id'] = None
+
     def _run(self):
         twitter_state = self.state['twitter']
         gdax_state = self.state['gdax']
@@ -401,17 +413,7 @@ class TradingStateMachine:
             if ctxt['status'] == 'expired':
                 continue
             elif ctxt['status'] == 'settled':
-                if ctxt['order_id'] is None or ctxt['position'] != 'short':
-                    continue
-                if now < ctxt.get('order_next_check', 0):
-                    continue
-                ctxt['order_next_check'] = now + 1800
-                r = self.gdax.get_order(ctxt['order_id'])
-                log.debug(
-                    "Fetched rebuy order %s details: %s", ctxt['order_id'], r)
-                if r and r.get('status') == 'done':
-                    ctxt['order_id'] = None
-
+                self._check_early_exit_status(ctxt, now)
                 continue
 
             order_instance = ctxt.get('order_instance')
