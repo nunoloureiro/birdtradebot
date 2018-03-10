@@ -459,7 +459,7 @@ class TradingStateMachine:
             except (TypeError, KeyError):
                 limit_order = False
 
-            if ctxt['status'] in ('pending', 'open'):
+            if ctxt['status'] in ('pending', 'open') and ctxt['order_id']:
                 r = self.gdax.get_order(ctxt['order_id'])
                 log.debug("Fetched order %s details: %s", ctxt['order_id'], r)
 
