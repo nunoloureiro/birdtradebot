@@ -103,7 +103,7 @@ PRICE_PRECISION = {
     'ETH-EUR': 2,
     'BTC-EUR': 2,
     'ETH-BTC': 5,
-    'IOT-USD': 5,
+    'IOT-USD': 4,
 }
 
 
@@ -395,6 +395,7 @@ class TradingStateMachine:
         ctxt['status'] = 'expired'
 
     def _handle_settled_order(self, ctxt, r):
+        ctxt['status'] = 'settled'
         ctxt['position'] = 'long' if ctxt['order']['side'] == 'buy' else 'short'
         log.info("Order %s done: %s", ctxt['order_id'], r)
         log.info("csv %s,%s,%s,%s,%s,%s,%s,%s, %s",
