@@ -17,6 +17,7 @@ import errno
 import getpass
 import json
 import os
+import random
 import sys
 import time
 
@@ -25,7 +26,7 @@ import math
 import re
 
 from copy import deepcopy
-from decimal import Decimal as D
+from decimal import Decimal
 from math import floor
 
 from exchanges import bitfinex
@@ -107,6 +108,11 @@ PRICE_PRECISION = {
 }
 
 
+def D(n):
+    """" Convert n to decimal """
+    return Decimal(str(n))
+
+
 def help_formatter(prog):
     """ So formatter_class's max_help_position can be changed. """
     return argparse.HelpFormatter(prog, max_help_position=40)
@@ -140,7 +146,7 @@ def get_price(gdax_client, pair):
     except KeyError:
         return 'NA'
 
-    return D(str(order_book['bids'][0][0]))
+    return D(order_book['bids'][0][0])
 
 
 def get_balance(gdax_client, status_update=False, status_csv=False):
@@ -227,6 +233,18 @@ def twitter_handles_to_userids(twitter, handles):
         raise RuntimeError('No followable Twitter handles found in rules!')
 
     return ids_map
+
+
+def split_amount(amount, minval, maxval, precision=3):
+    remaining = D(amount)
+    parts = []
+    while remaining > 0:
+        n = D(random.random() * (maxval - minval) + minval)
+        part = D(round_down(n, precision))
+        part = D(min(remaining, part))
+        parts.append(part)
+        remaining -= part
+    return parts
 
 
 class State:
@@ -554,17 +572,18 @@ class TradingStateMachine:
                 if not funding_error:
                     break
 
-            base_asset_amount = self.available[base_asset]
+            previous_balance = self.available[base_asset]
             self.available = get_balance(self.gdax, status_update=True)
-            if base_asset_amount != self.available[base_asset]:
-                break
 
             log.warning("Fallback: server said we have insufficient funds. "
-                        "Current balance (%s) == previous balance (%s). "
+                        "Current balance: %s, previous balance: %s. "
                         "Will try decreasing buy amount...",
-                        base_asset_amount, self.available[base_asset])
-            order['size'] = str(round_down(
-                D(orig_order_size) * (D('0.999') - D(i) * D('0.002'))))
+                        self.available[base_asset], previous_balance)
+
+            size = D(orig_order_size) * (D('0.999') - D(i) * D('0.002'))
+            size = min(size, self.available[base_asset])
+            size = str(round_down(size))
+            order['size'] = size
 
             log.info("Fallback: order: %s", order)
             r = self.gdax.buy(**order)
@@ -632,11 +651,12 @@ class TradingStateMachine:
             ))
         return str(round_down(size))
 
-    def _build_order(self, order, pair, ctxt):
+    def _build_order(self, order, ctxt):
+        pair = ctxt['pair']
         asset, base_asset = pair.split('-')
         order_book = self.public_client.get_product_order_book(pair)
-        inside_bid = D(str(order_book['bids'][0][0]))
-        inside_ask = D(str(order_book['asks'][0][0]))
+        inside_bid = D(order_book['bids'][0][0])
+        inside_ask = D(order_book['asks'][0][0])
         precision = PRICE_PRECISION.get(pair, 2)
         price = D(eval(order['price'].format(
             inside_bid=inside_bid,
@@ -664,22 +684,24 @@ class TradingStateMachine:
             self._cancel_order(ctxt['order_id'])
             ctxt['order_id'] = None
 
+        # Update available funds before calculating order size.
+        self.available = get_balance(self.gdax, status_update=True)
         order = order if order is not None else deepcopy(ctxt['order'])
-        order = self._build_order(order, ctxt['pair'], ctxt)
+        order = self._build_order(order, ctxt)
         if order is None:
             return
 
         if _type is not None:
             order['type'] = _type
-        ctxt['order_instance'] = order
         if order['type'] == 'market':
             if 'price' in order:
                 del order['price']
             if 'post_only' in order:
                 del order['post_only']
 
+        ctxt['order_instance'] = order
+
         asset, base_asset = ctxt['pair'].split('-')
-        self.available = get_balance(self.gdax, status_update=True)
         if order['side'] == 'buy':
             log.info('Placing order: %s' % order)
             r = self.gdax.buy(**order)
