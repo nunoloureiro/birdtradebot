@@ -555,9 +555,6 @@ class TradingStateMachine:
         contexts = []
         for order in rule['orders']:
             ctxt = new_pair_context(rule, order, tweet)
-            if ctxt['order_id'] is not None:
-                self._cancel_order(ctxt['order_id'])
-                ctxt['order_id'] = None
             contexts.append(ctxt)
         return contexts
 
