@@ -105,14 +105,15 @@ def convert_bitfinex_order_reply_to_gdax(reply):
 
     result = {
             'id': raw_reply['id'],
-            'size': raw_reply['executed_amount'],
+            'size': raw_reply['original_amount'],
+            'filled_size': raw_reply.get('executed_amount', '0.0'),
             'product_id': convert_raw_pair_to_gdax(raw_reply['symbol']),
             'side': raw_reply['side'],
             'type': convert_raw_type_to_gdax(raw_reply['type']),
             'status': status,
             'settled': settled,
             'created_at': reply.get('datetime'),
-            'bitfinex_reply': raw_reply
+            'bitfinex_reply': raw_reply,
     }
     price = raw_reply.get('price')
     if price is not None:
