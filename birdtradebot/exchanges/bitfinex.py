@@ -47,7 +47,7 @@ def handle_errors(f):
 
 
 def convert_pair_from_gdax(gp):
-    # The rules file uses "IOT" as IOTA's currency identifier (e.g., IOT-USD).
+    # The config file uses "IOT" as IOTA's currency identifier (e.g., IOT-USD).
     # However, ccxt expects "IOTA" as the identifier.
     currency_map = {
         'IOT': 'IOTA'

@@ -3,12 +3,10 @@
 birdtradebot
 
 Checks tweets and
-uses rules specified in file to make market trades on exchanges using
-the GDAX API. Default rules are stored in
-rules/birdpersonborg.py and follow the tweets of @birdpersonborg.
+uses config specified in file to make market trades on exchanges using
+the GDAX API. Default config are stored in
+config/accounts.py and follow the tweets of @birdpersonborg.
 """
-from __future__ import print_function
-
 import argparse
 import base64
 import datetime
@@ -21,23 +19,19 @@ import random
 import sys
 import time
 
-# Might be used in rules
+# Might be used in config
 import math
 import re
 
 from copy import deepcopy
 from decimal import Decimal
 from math import floor
+from typing import List, Dict, Set
 
 from exchanges import bitfinex
+from .rule import Rule
 
 decimal.getcontext().rounding = decimal.ROUND_DOWN
-
-# For 2-3 compatibilityx
-try:
-    input = raw_input
-except NameError:
-    pass
 
 _help_intro = """birdtradebot allows users to base GDAX trades on tweets."""
 _key_derivation_iterations = 5000
@@ -118,17 +112,6 @@ def help_formatter(prog):
     return argparse.HelpFormatter(prog, max_help_position=40)
 
 
-def prettify_dict(rule):
-    """ Prettifies printout of dictionary as string.
-
-        rule: rule
-
-        Return value: rule string
-    """
-    return json.dumps(rule, sort_keys=False,
-                        indent=4, separators=(',', ': '))
-
-
 def round_down(n, d=8):
     d = int('1' + ('0' * d))
     return floor(n * d) / d
@@ -166,7 +149,7 @@ def get_balance(gdax_client, status_update=False, status_csv=False):
         log.info('Current balance in wallet: %s' % balance_str)
     if status_csv:
         now = datetime.datetime.now()
-        # TODO - do this log for the pairs we are trading (retrieved from rules)
+        # TODO - do this log for the pairs we are trading (retrieved from config)
         balance_csv = (
             "%s, balance, EUR-ETH-BTC, %s, %s, %s, bids, "
             "BTC-EUR ETH-EUR ETH-BTC, %s, %s, %s"
@@ -230,7 +213,7 @@ def twitter_handles_to_userids(twitter, handles):
                 raise
 
     if not ids_map:
-        raise RuntimeError('No followable Twitter handles found in rules!')
+        raise RuntimeError('No followable Twitter handles found in config!')
 
     return ids_map
 
@@ -316,8 +299,8 @@ def new_pair_context(rule, order, tweet):
 class TradingStateMachine:
     """ Trades on GDAX based on tweets. """
 
-    def __init__(self, rules, gdax_client, public_client, twitter_client,
-                 handles, state, sleep_time=0.5):
+    def __init__(self, rules: List[Dict], gdax_client, public_client, twitter_client,
+                 handles: Set, state: State, sleep_time: float=0.5):
         self.rules = rules
         self.gdax = gdax_client
         self.twitter = twitter_client
@@ -331,7 +314,7 @@ class TradingStateMachine:
     def _do_post_short_tasks(self, ctxt):
         if ctxt['status'] != 'settled' or ctxt['position'] != 'short':
             log.warning(
-                "Order state does not allow to apply short rules: %s", ctxt)
+                "Order state does not allow to apply short config: %s", ctxt)
             return
 
         self._set_early_exit(ctxt)
@@ -795,18 +778,7 @@ def go():
                 'after a subcommand for its parameters'),
                 dest='subparser_name'
             )
-    config_parser = subparsers.add_parser(
-                            'configure',
-                            help=(
-                                'creates profile for storing keys/secrets; '
-                                'all keys are stored in "{}".'.format(
-                                        os.path.join(
-                                            os.path.expanduser('~'),
-                                            '.birdtradebot',
-                                            'config')
-                                    )
-                            )
-                        )
+
     trade_parser = subparsers.add_parser(
                             'trade',
                             help='trades based on tweets'
@@ -816,10 +788,10 @@ def go():
             default='default',
             help='which profile to use for trading'
         )
-    trade_parser.add_argument('--rules', '-r', type=str, required=False,
+    trade_parser.add_argument('--config', '-c', type=str, required=False,
             default=os.path.join(os.path.dirname(os.path.realpath(__file__)),
-                                    'rules', 'birdpersonborg.py'),
-            help=('rules file; this is Python that sets the variable "rules" '
+                                    'config', 'accounts.py'),
+            help=('config file; this is Python that sets the variable "config" '
                   'to a list of dictionaries')
         )
     trade_parser.add_argument('--interval', '-i', type=float, required=False,
@@ -837,315 +809,15 @@ def go():
         )
     args = parser.parse_args()
     key_dir = os.path.join(os.path.expanduser('~'), '.birdtradebot')
-    if args.subparser_name == 'configure':
-        try:
-            os.makedirs(key_dir)
-        except OSError as e:
-            if e.errno != errno.EEXIST:
-                raise
-        # Grab and write all necessary credentials
-        config_file = os.path.join(key_dir, 'config')
-        print('Enter a name for a new profile (default): ', end='')
-        profile_name = input()
-        if not profile_name: profile_name = 'default'
-        salt = Random.new().read(AES.block_size)
-        key = KDF.PBKDF2(getpass.getpass((
-                'Enter a password for this profile. The password will be used '
-                'to generate a key so all GDAX/Twitter passcodes/secrets '
-                'written to {} are further encoded with AES256. '
-                'You will have to enter a profile\'s password every time you '
-                'run "birdtradebot trade": '
-            ).format(config_file)), salt,
-                dkLen=32, count=_key_derivation_iterations)
-        previous_lines_to_write = []
-        if os.path.exists(config_file):
-            '''Have to check if the profile exists already. If it does, replace
-            it. Assume the config file is under birdtradebot's control and thus 
-            has no errors; if the user chooses to mess it up, that's on
-            them.'''
-            with open(config_file, 'rU') as config_stream:
-                line = config_stream.readline().rstrip('\n')
-                while line:
-                    if line[0] == '[' and line[-1] == ']':
-                        if profile_name == line[1:-1]:
-                            # Skip this profile
-                            for _ in range(8): config_stream.readline()
-                            line = config_stream.readline().rstrip('\n')
-                            continue
-                        previous_lines_to_write.append(line)
-                        for _ in range(8):
-                            previous_lines_to_write.append(
-                                        config_stream.readline().rstrip('\n')
-                                    )
-                    line = config_stream.readline().rstrip('\n')
-        with open(config_file, 'w') as config_stream:
-            print(''.join(['[', profile_name, ']']), file=config_stream)
-        # Now change permissions
-        try:
-            os.chmod(config_file, 0o600)
-        except OSError as e:
-            if e.errno == errno.EPERM:
-                print >>sys.stderr, (
-                        ('Warning: could not change permissions of '
-                         '"{}" so it\'s readable/writable by only the '
-                         'current user. If there are other users of this '
-                         'system, they may be able to read your credentials '
-                         'file.').format(
-                                config_file
-                            )
-                    )
-                raise
-        with open(config_file, 'a') as config_stream:
-            print(''.join(['Salt: ', base64.b64encode(salt).decode()]),
-                    file=config_stream)
-            for token in ['GDAX key', 'GDAX secret', 'GDAX passphrase',
-                            'Twitter consumer key', 'Twitter consumer secret',
-                            'Twitter access token key',
-                            'Twitter access token secret']:
-                if 'key' in token:
-                    print(''.join(['Enter ', token, ': ']), end='')
-                    '''Write it in plaintext if it's a public key; then the 
-                    user can open the config file and know which keys are in 
-                    use.'''
-                    print(''.join([token, ': ', input()]),
-                            file=config_stream)
-                else:
-                    # A warning to developers in a variable name
-                    unencoded_and_not_to_be_written_to_disk = getpass.getpass(
-                                        ''.join(['Enter ', token, ': '])
-                                    )
-                    iv = Random.new().read(AES.block_size)
-                    cipher = AES.new(key, AES.MODE_CFB, iv)
-                    print(''.join([
-                            token,
-                            ' (AES256-encrypted using profile password): ',
-                            base64.b64encode(iv + cipher.encrypt(
-                                unencoded_and_not_to_be_written_to_disk.encode()
-                            )).decode()]), file=config_stream)
-            for line in previous_lines_to_write:
-                print(line, file=config_stream)
-        print(('Configured profile "{}". Encrypted credentials have been '
-               'stored in "{}". '
-               'Now use the "trade" subcommand to '
-               'trigger trades with new tweets.').format(
-                        profile_name,
-                        config_file
-                    ))
-    elif args.subparser_name == 'trade':
-        # Set and check rules
+    if args.subparser_name == 'trade':
+        # Set and check config
         from imp import load_source
         try:
-            rules = load_source('rules', args.rules).rules
+            config = load_source('config', args.config).rules
         except IOError as e:
-            e.message = 'Cannot find or access rules file "{}".'.format(
+            e.message = 'Cannot find or access config file "{}".'.format(
                                                                     args.rules
                                                                 )
-            raise
-        import copy
-        # Add missing keys so listener doesn't fail
-        new_rules = copy.copy(rules)
-        order_vocab = frozenset([
-            'client_oid', 'type', 'side', 'product_id', 'stp',
-            'price', 'size', 'time_in_force', 'cancel_after',
-            'post_only', 'funds', 'overdraft_enabled', 'funding_amount',
-        ])
-
-        for i, rule in enumerate(rules):
-            # Check 'condition'
-            try:
-                eval(rule['condition'].format(
-                        tweet='"The rain in Spain stays mainly in the plain."',
-                        available={
-                            'ETH' : .01,
-                            'USD' : .01,
-                            'LTC' : .01,
-                            'BTC' : .01
-                        }
-                    ))
-            except KeyError:
-                # 'condition' isn't required, so make default True
-                new_rules[i]['condition'] = 'True'
-            except:
-                raise RuntimeError(''.join([
-                        ('"condition" from the following rule in the file '
-                         '"{}" could not be '
-                         'evaluated; check the format '
-                         'and try again: ').format(args.rules),
-                        os.linesep, prettify_dict(rule)
-                    ])
-                )
-
-            # Check handles and keywords
-            if 'handles' not in rule and 'keywords' not in rule:
-                raise RuntimeError(''.join([
-                        ('A rule must have at least one of {{"handles", '
-                         '"keywords"}}, but this rule from the file "{}" '
-                         'doesn\'t:').format(args.rules),
-                        os.linesep, prettify_dict(rule)
-                    ])
-                )
-            if 'handles' not in rule:
-                new_rules[i]['handles'] = []
-            if 'keywords' not in rule:
-                new_rules[i]['keywords'] = []
-            new_rules[i]['handles'] = [
-                    handle.lower() for handle in new_rules[i]['handles']
-                ]
-            new_rules[i]['keywords'] = [
-                    keyword.lower() for keyword in new_rules[i]['keywords']
-                ]
-            '''Validate order; follow https://docs.gdax.com/#orders for 
-            filling in default values.'''
-            if 'orders' not in rule or not isinstance(rule['orders'], list):
-                raise RuntimeError(''.join([
-                        ('Every rule must have an "orders" list, but '
-                         'this rule from the file "{}" doesn\'t:').format(
-                        args.rules), os.linesep, prettify_dict(rule)
-                    ])
-                )
-            for j, order in enumerate(rule['orders']):
-                if not isinstance(order, dict):
-                    raise RuntimeError(''.join([
-                        ('Every order must be a dictionary, but order #{} '
-                         'from this rule in the file "{}" isn\'t:').format(
-                        j+1, args.rules), os.linesep, prettify_dict(rule)]))
-                unrecognized_keys = [
-                        key for key in order if key not in order_vocab
-                    ]
-                if unrecognized_keys:
-                    raise RuntimeError(''.join([
-                        'In the file "{}", the "order" key(s) '.format(
-                            args.rules),
-                        os.linesep, '[',
-                        ', '.join(unrecognized_keys), ']', os.linesep,
-                        ('are invalid yet present in order #{} of '
-                         'the following rule:').format(j+1),
-                        os.linesep, prettify_dict(rule)
-                    ]))
-                try:
-                    if order['type'] not in ('limit', 'market', 'stop'):
-                        raise RuntimeError(''.join([
-                            ('An order\'s "type" must be one of {{"limit", '
-                             '"market", "stop"}}, which order #{} in this '
-                             'rule from the file "{}" doesn\'t '
-                             'satisfy:').format(j+1, args.rules),
-                            os.linesep, prettify_dict(rule)
-                        ]))
-                except KeyError:
-                    # GDAX default is limit
-                    new_rules[i]['orders'][j]['type'] = 'limit'
-                if 'side' not in order:
-                    raise RuntimeError(''.join([
-                            ('An order must have a "side", but order #{} in '
-                             'this rule from the file "{}" doesn\'t:').format(
-                             j+1, args.rules), os.linesep, prettify_dict(rule)
-                        ])
-                    )
-                if order['side'] not in ['buy', 'sell']:
-                        raise RuntimeError(''.join([
-                            ('An order\'s "side" must be one of {{"buy", '
-                             '"sell"}}, which order #{} in this rule '
-                             'from the file "{}" doesn\'t satisfy:').format(
-                             j+1, args.rules), os.linesep, prettify_dict(rule)
-                        ])
-                    )
-                if 'product_id' not in order:
-                    raise RuntimeError(''.join([
-                            ('An order must have a "product_id", but in the '
-                             'file "{}", order #{} from this rule '
-                             'doesn\'t:').format(args.rules, j+1),
-                            os.linesep, prettify_dict(rule)
-                        ]))
-                if new_rules[i]['orders'][j]['type'] == 'limit':
-                    for item in ['price', 'size']:
-                        if item not in order:
-                            raise RuntimeError(''.join([
-                                ('If an order\'s "type" is "limit", the order '
-                                 'must specify a "{}", but in the file "{}",'
-                                 'order #{} from this rule doesn\'t:').format(
-                                 item, args.rules, j+1),
-                                 os.linesep, prettify_dict(rule)
-                            ]))
-                elif new_rules[i]['orders'][j]['type'] in ['market', 'stop']:
-                    if 'size' not in order and 'funds' not in order:
-                        raise RuntimeError(''.join([
-                                ('If an order\'s "type" is "{}", the order '
-                                 'must have at least one of {{"size", '
-                                 '"funds"}}, but in file "{}", order #{} '
-                                 'of this rule doesn\'t:').format(
-                                        new_rules[i]['orders'][j]['type'],
-                                        args.rules, j+1
-                                    ), os.linesep, prettify_dict(rule)]))
-                for stack in ['size', 'funds', 'price']:
-                    try:
-                        eval(order[stack].format(
-                            tweet=('"The rain in Spain stays mainly '
-                                   'in the plain."'),
-                            available={
-                                'ETH' : .01,
-                                'USD' : .01,
-                                'LTC' : .01,
-                                'BTC' : .01
-                            }, inside_bid=200, inside_ask=200))
-                    except KeyError:
-                        pass
-                    except Exception as e:
-                        raise RuntimeError(''.join([
-                                ('"{}" from order #{} in the following '
-                                 'rule from the file "{}" could not be '
-                                 'evaluated; check the format '
-                                 'and try again:').format(
-                                        stack, j+1, args.rules
-                                    ), os.linesep, prettify_dict(rule)]))
-        rules = new_rules
-        # Use _last_ entry in config file with profile name
-        key = None
-        try:
-            with open(os.path.join(key_dir, 'config'), 'rU') as config_stream:
-                line = config_stream.readline().rstrip('\n')
-                while line:
-                    profile_name = line[1:-1]
-                    if profile_name == args.profile:
-                        salt = base64.b64decode(
-                                config_stream.readline().rstrip(
-                                        '\n').partition(': ')[2]
-                            )
-                        if key is None:
-                            key = KDF.PBKDF2(getpass.getpass(
-                                    'Enter password for profile "{}": '.format(
-                                                                profile_name
-                                                            )
-                                ), salt,
-                                dkLen=32, count=_key_derivation_iterations
-                            )
-                        keys_and_secrets = []
-                        for _ in range(7):
-                            item, _, encoded = config_stream.readline().rstrip(
-                                                    '\n').partition(': ')
-                            if 'key' in item:
-                                # Not actually encoded; remove leading space
-                                keys_and_secrets.append(encoded)
-                                continue
-                            encoded = base64.b64decode(encoded)
-                            cipher = AES.new(
-                                    key, AES.MODE_CFB,
-                                    encoded[:AES.block_size]
-                                )
-                            keys_and_secrets.append(
-                                    cipher.decrypt(
-                                            encoded
-                                        )[AES.block_size:]
-                                )
-                    else:
-                        # Skip profile
-                        for _ in range(8): config_stream.readline()
-                    line = config_stream.readline().rstrip('\n')
-        except IOError as e:
-            e.message = (
-                    'Cannot find birdtradebot config file. Use '
-                    '"birdtradebot configure" to configure birdtradebot '
-                    'before trading.'
-                )
             raise
 
         # Get all twitter handles to monitor
