@@ -574,14 +574,16 @@ class TradingStateMachine:
 
             previous_balance = self.available[base_asset]
             self.available = get_balance(self.gdax, status_update=True)
-
             log.warning("Fallback: server said we have insufficient funds. "
-                        "Current balance: %s, previous balance: %s. "
-                        "Will try decreasing buy amount...",
+                        "Current balance: %s, previous balance: %s.",
                         self.available[base_asset], previous_balance)
 
+            if previous_balance > self.available[base_asset]:
+                break
+
+            log.warning("Fallback: decreasing buy size...")
+
             size = D(orig_order_size) * (D('0.999') - D(i) * D('0.002'))
-            size = min(size, self.available[base_asset])
             size = str(round_down(size))
             order['size'] = size
 
