@@ -12,13 +12,8 @@ setup(name='birdtradebot',
       package_data={'birdtradebot': ['*.py', './config/*']},
       zip_safe=True,
       install_requires=[
-          'twython', 'gdax', 'ccxt, ''pycryptodome', 'python-dateutil', 'ccxt'
+          'twython', 'gdax', 'ccxt', 'python-dateutil', 'jsonpickle',
       ],
-      entry_points={
-        'console_scripts': [
-            'birdtradebot=birdtradebot:go',
-        ],
-      },
       keywords=['bitcoin', 'btc', 'ethereum', 'eth', 'twitter'],
       classifiers=[
           'Programming Language :: Python :: 3',
