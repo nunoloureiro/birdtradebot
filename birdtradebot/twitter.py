@@ -9,9 +9,9 @@ log = logging.getLogger(__name__)
 
 class Tweet:
     def __init__(self, tweet: Dict):
-        self.id = tweet['id']
-        self.text = tweet['text']
-        self.handle = tweet['handle']
+        self.id: str = tweet['id']
+        self.text: str = tweet['text']
+        self.handle: str = tweet['handle']
         try:
             self.screen_name = tweet['user']['screen_name']
         except KeyError:

@@ -13,10 +13,11 @@ class Rule:
         self.ttl = int(config.get('ttl', 600))
         self.order_ttl = int(config.get('order_ttl'), 60)
         self.check_interval = int(config.get('check_interval', 30))
-        self.max_quote_currency = D(config.get('max_quote_currency', 0))
+        self.split_order_size = D(config.get('split_order_size', 0))
         self.tweet_ttl = int(config.get('tweet_ttl', 600))
         self.market_fallback: bool = config.get('market_fallback', False)
         self.cancel_expired: bool = config.get('cancel_expired', False)
+        self.position: str = config['position']
 
         self._validate()
         self.order_template = OrderTemplate(config['order'])

@@ -1,47 +1,65 @@
 import json
+import logging
+import time
+
 import ccxt
 
 from ccxt.base.errors import (
         BaseError,
         InsufficientFunds,
-        OrderNotFound)
+        OrderNotFound,
+        NetworkError)
 
 from decimal import Decimal as D
+
+log = logging.getLogger(__name__)
 
 
 def handle_errors(f):
     def wrapper(*args, **kwargs):
-        err = {'type': 'error', 'message': 'could not determine error type'}
-        try:
-            return f(*args, **kwargs)
-        except InsufficientFunds as ife:
-            err['message'] = 'Insufficient funds'
-            err['orig_message'] = '%s' % ife
-        except OrderNotFound as nfe:
-            err['message'] = 'Order not found'
-            err['orig_message'] = '%s' % nfe
-        except BaseError as be:
-            msg = '%s' % be
-            if 'message' not in msg:
-                return err
-
-            json_start = msg.find('{')
-            if json_start == -1:
-                return err
-
-            maybe_json = msg[json_start:]
+        r = {'type': 'error', 'message': 'Unspecified error'}
+        for attempt in range(3):
             try:
-                json_err = json.loads(maybe_json)
-            except (TypeError, ValueError):
-                return err
-            else:
-                msg = json_err['message']
-                if 'minimum size for' in msg:
-                    err['orig_message'] = msg
-                    msg = 'Order size is too small.'
-                err['message'] = msg
+                r = f(*args, **kwargs)
+            except NetworkError as nete:
+                log.error("Network error while trying to place order: %s", nete)
+                r['orig_message'] = '%s' % nete
+                r['message'] = 'Network error'
+                time.sleep(10)
+                continue
+            except InsufficientFunds as ife:
+                r['orig_message'] = '%s' % ife
+                r['message'] = 'Insufficient funds'
+            except OrderNotFound as onfe:
+                r['orig_message'] = '%s' % onfe
+                r['message'] = 'Order not found'
+            except BaseError as be:
+                log.error("Unspecified bitfinex error: %s", be)
+                msg = '%s' % be
+                r['orig_message'] = msg
 
-        return err
+                if 'minimum size for' in msg:
+                    r['message'] = 'Order size is too small.'
+                    break
+
+                json_start = msg.find('{')
+                if json_start == -1:
+                    break
+
+                maybe_json = msg[json_start:]
+                try:
+                    json_err = json.loads(maybe_json)
+                except (TypeError, ValueError):
+                    pass
+                else:
+                    msg = json_err.get('message')
+                    if msg is not None:
+                        r['orig_message'] = msg
+
+            # Unless requested (e.g., for a retry), the loop will only run once.
+            break
+
+        return r
 
     return wrapper
 

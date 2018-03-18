@@ -73,8 +73,10 @@ class Exchange:
 
 
 class AccountState:
-    def __init__(self, name: str, initial_balance: Dict[str, StrOrNone]):
+    def __init__(self, name: str, initial_balance: Dict[str, StrOrNone],
+                 virtual: bool = True):
         self.name = name
+        self.virtual = virtual
         self.balance = {}
         for cur, amount in initial_balance.items():
             self.balance[cur] = D(amount) if amount is not None else None
@@ -85,14 +87,14 @@ class AccountState:
 class Pair:
     def __init__(self, _id: str):
         self.id = _id
-        self.pending_orders: Set[str] = set()
+        self.pending_orders: List[OrderState] = []
         self.size = D(0)
         self.filled_size = D(0)
         self.executed_value = D(0)
         self.rule: Rule = None
         self.tweet: Tweet = None
         self.status: str = None
-        self.position: str = None
+        self.position = None
         self.expiration: int = 0
 
     def update(self, rule: Rule, tweet: Tweet):
@@ -105,11 +107,7 @@ class Pair:
         log.info("Updating pair %s based on new tweet info: %s",
                  self.id, tweet.text)
 
-        # Updating the tweet field will notify the "update_pair" thread
-        # (if running) that new a new tweet arrived, causing it to stop.
         self.tweet = tweet
-
-        # Ensure that no operation is currently running for this pair.
         self.rule = rule
         self.expiration = tweet.created_ts + rule.ttl
         self.size = D(0)
@@ -136,6 +134,7 @@ class Account:
         self.pairs: Dict[str, Pair] = state.pairs
         self.balance: Dict[str, Decimal] = state.balance
         self.pending_orders: Set[str] = state.pending_orders
+        self.virtual = state.virtual
         self.lock = threading.Lock()
 
     def refresh_balance(self, status_update=False, status_csv=False):
@@ -178,67 +177,54 @@ class Account:
         currencies = self.exchange.auth.get_accounts()
         for name, exchange_amount in currencies.items():
             amount = self.balance[name]
-            if amount is None:
+            if amount is None or not self.virtual:
                 amount = D(exchange_amount)
             self.balance[name] = min(amount, exchange_amount)
         return self.balance
 
-    def _handle_settled_pending_order(self, order_state: OrderState):
-        base_currency, quote_currency = order_state.product_id.split('-', 1)
-
-        if order_state.side == 'buy':
-            self.balance[base_currency] += order_state.filled_size
-        elif order_state.side == 'sell':
-            self.balance[quote_currency] += order_state.executed_value
-        else:
-            log.error("Could not determine order side: %s",
-                      order_to_dict(order_state))
-
-    def _handle_failed_pending_order(self, order_state: OrderState):
-        base_currency, quote_currency = order_state.product_id.split('-', 1)
-
-        if order_state.type != 'limit' or order_state.type not in (None, 'GTC'):
-            return
-
-        currency = None
-        refund = None
-        if order_state.side == 'buy':
-            refund = order_state.size * order_state.price
-            if not order_state.post_only:
-                refund += refund * self.exchange.taker_fee
-            refund -= order_state.executed_value - order_state.fill_fees
-            currency = quote_currency
-        elif order_state.side == 'sell':
-            refund = order_state.size - order_state.filled_size
-            currency = base_currency
-        else:
-            err = "Could not determine order side: %s" % order_to_dict(order_state)
-            log.error(err)
-
-        if refund < 0:
-            log.error('Refund < 0! Please investigate this: %s',
-                      order_to_dict(order_state))
-            refund = D(0)
-
-        self.balance[currency] += refund
-
     def _update_balance_from_order(self, order_state: OrderState):
+        if not self.virtual:
+            return
         if order_state.status != 'done':
             return
-        if order_state.id not in self.pending_orders:
+        if order_state.id in self.pending_orders:
             self._update_balance_from_pending_order(order_state)
 
-    def _update_balance_from_immediate_order(self, order_state: OrderState):
-        if order_state.status != 'done':
-            for i in range(7):
-                order_state = self.get_order(order_state.id)
+    def _wait_for_order(self, _id: str, ttl: int) -> Union[OrderState, None]:
+        order_state = None
+        for i in range(ttl):
+            order_state = None
+            try:
+                order_state = self.get_order(_id)
+            except OrderNotFound:
+                log.error("Server said immediate order %s is not found. "
+                          "This should have not happened.", _id)
+                break
+            except OrderError as oerr:
+                log.error("Unspecified error while trying to fetch order "
+                          "%s: %s", _id, oerr)
+            else:
                 if order_state.status == 'done':
+                    log.info("Order %s done after %d seconds.", _id, i)
                     break
-                time.sleep(1)
 
-            if order_state.status != 'done':
-                log.error("Tried to update balance with an order that is not yet "
-                          "done: %s", order_to_dict(order_state))
+            time.sleep(1)
+
+        if order_state is None or order_state.status != 'done':
+            log.error("Tried to update balance, but order %s is not yet done.",
+                      _id)
+
+        return order_state
+
+    def _update_balance_from_immediate_order(self, order_state: OrderState):
+        if not self.virtual:
+            return
+
+        if order_state.status != 'done':
+            # An immediate order is expected to finish quickly. Wait a few
+            # seconds until it does.
+            order_state = self._wait_for_order(order_state.id, ttl=30)
+            if order_state is None:
                 return
 
         base_currency, quote_currency = order_state.product_id.split('-', 1)
@@ -253,8 +239,15 @@ class Account:
                       order_to_dict(order_state))
 
     def _update_balance_from_pending_order(self, order_state: OrderState):
+        if not self.virtual:
+            return
+        if order_state.id not in self.pending_orders:
+            log.error('Tried to update balance with an order that does not '
+                      'appear to be a pending order: %s',
+                      order_to_dict(order_state))
+            return
         if order_state.status != 'done':
-            log.error("Tried to update balance with an order that is not yet "
+            log.error("Tried to update balance with an order that has not yet "
                       "finished: %s", order_to_dict(order_state))
             return
 
@@ -268,12 +261,10 @@ class Account:
                 refund += refund * self.exchange.taker_fee
             refund -= order_state.executed_value - order_state.fill_fees
             refund_currency = quote_currency
-
         elif order_state.side == 'sell':
             self.balance[quote_currency] += order_state.executed_value
             refund = order_state.size - order_state.filled_size
             refund_currency = base_currency
-
         else:
             log.error("Could not determine order side: %s",
                       order_to_dict(order_state))
@@ -298,11 +289,10 @@ class Account:
     def cancel_order(self, order_id):
         r = self.exchange.auth.cancel_order(order_id)
         self._handle_errors(r)
-        time.sleep(0.250)
         if order_id in self.pending_orders:
+            time.sleep(0.5)
             order_state = self.get_order(order_id)
             self._update_balance_from_pending_order(order_state)
-
         return r
 
     def _handle_errors(self, reply: Dict[str, str]):
@@ -320,6 +310,8 @@ class Account:
             raise OrderError(msg)
 
     def _capture_balance_for_limit_order(self, order: Order):
+        if not self.virtual:
+            return None, None
         base_currency, quote_currency = order.product_id.split('-', 1)
 
         if order.type == 'market' or order.time_in_force == 'FOK':

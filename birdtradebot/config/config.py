@@ -25,9 +25,10 @@ bird_eth_rules = [
         'condition': '"ETHEUR" in {tweet} and "long" in {tweet}.lower()',
         'ttl': 600,
         'order_ttl': 60,
-        'max_quote_currency': 7000,
+        'max_split_size': 10,
         'tweet_ttl': 600,
         'market_fallback': True,
+        'position': 'long',
         'order': {
             'side': 'buy',
             'type': 'limit',
@@ -41,9 +42,10 @@ bird_eth_rules = [
         'condition': '"ETHEUR" in {tweet} and "short" in {tweet}.lower()',
         'ttl': 600,
         'order_ttl': 60,
-        'max_quote_currency': 7000,
+        'split_order_size': 10,
         'tweet_ttl': 600,
         'market_fallback': True,
+        'position': 'short',
         'order': {
             'side': 'sell',
             'type': 'limit',
