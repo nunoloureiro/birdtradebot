@@ -64,6 +64,7 @@ from .order import (
     OrderExpired,
     InsufficientFunds,
     order_to_dict,
+    orders_match
 )
 
 PRICE_PRECISION = {
@@ -123,13 +124,13 @@ def twitter_handles_to_userids(twitter, handles):
     return ids_map
 
 
-def calc_buy_size(account: Account, template: OrderTemplate,
+def calc_buy_size(account: Account, pair: Pair,
                   ask: Decimal, bid: Decimal, price: Decimal) -> Decimal:
-    _, quote_currency = template.product_id.split('-', 1)
+    quote_currency = pair.quote_currency
     short_pairs = []
     for pair in account.pairs.values():
         # Only count pairs with the same quote currency, e.g., *-EUR, *-BTC
-        if not pair.id.endswith('-%s' % quote_currency):
+        if not pair.product_id.endswith('-%s' % quote_currency):
             continue
 
         if pair.position == 'long':
@@ -137,8 +138,8 @@ def calc_buy_size(account: Account, template: OrderTemplate,
 
         # TODO: check if this is right. It depends on whether the exchange
         # updates the balance as orders are being placed or not
-        if pair.position == 'short':  # and pair.status == 'settled' ?
-            short_pairs.append(pair.id)
+        if pair.position == 'short':
+            short_pairs.append(pair.rule_id)
             continue
 
         # No position (short or long) yet. (i.e., no order has completed).
@@ -147,45 +148,53 @@ def calc_buy_size(account: Account, template: OrderTemplate,
 
         if pair.status == 'expired':
             # The twitter bot went short.
-            if selling: short_pairs.append(pair.id)
+            if selling: short_pairs.append(pair.rule_id)
             # The twitter bot went long.
             if buying: pass
 
         # The order has not expired. So we are still changing our state.
         else:
             # Buying. Ensure we get our share of the available balance.
-            if buying: short_pairs.append(pair.id)
+            if buying: short_pairs.append(pair.rule_id)
             # Selling.
             if selling: pass
 
     log.debug("The following pairs are short: %s", short_pairs)
     n_short_pairs = len(short_pairs)
-    if template.size == '{split_size}':
+    if pair.rule.order_template.size == '{split_size}':
         size = account.balance[quote_currency] / D(n_short_pairs) / price
     else:
-        max_size = account.balance[quote_currency] / price
-        size = eval(template.size.format(
+        max_account_buy_size = account.balance[quote_currency] / price
+
+        size = eval(pair.rule.order_template.size.format(
             inside_ask=ask,
             inside_bid=bid,
             balance=account.balance,
-            max_size=max_size
+            max_account_buy_size=max_account_buy_size,
         ))
 
     return D(round_down(size))
 
 
-def calc_sell_size(account: Account, template: OrderTemplate, ask, bid):
-    size = eval(template.size.format(
+def calc_sell_size(account: Account, pair: Pair, ask, bid):
+    base_currency, _ = pair.base_currency
+    max_account_sell_size = account.balance[base_currency]
+    size = eval(pair.rule.order_template.size.format(
         inside_ask=ask,
         inside_bid=bid,
-        balance=account.balance
+        balance=account.balance,
+        max_account_sell_size=max_account_sell_size,
     ))
+
     return D(round_down(size))
 
 
-def new_order(account: Account, template: OrderTemplate) -> Order:
+def new_order(account: Account, pair: Pair,
+              template: OrderTemplate=None) -> Order:
     # Update available funds before calculating order size.
     account.refresh_balance(status_update=True)
+    if template is None:
+        template = pair.rule.order_template
 
     order_book = account.get_product_order_book(template.product_id)
     inside_bid = D(order_book['bids'][0][0])
@@ -200,14 +209,13 @@ def new_order(account: Account, template: OrderTemplate) -> Order:
     order_dict['price'] = str(round_down(price, precision))
 
     if template.side == 'buy':
-        size = calc_buy_size(account, template, inside_ask, inside_bid, price)
-        order_dict['size'] = str(size)
+        size = calc_buy_size(account, pair, inside_ask, inside_bid, price)
     elif template.side == 'sell':
-        size = calc_sell_size(account, template, inside_ask, inside_bid)
-        order_dict['size'] = str(size)
+        size = calc_sell_size(account, pair, inside_ask, inside_bid)
     else:
         raise ValueError("Unrecognized order side: %s", template.side)
 
+    order_dict['size'] = str(size)
     log.info("Order built: %s", order_dict)
 
     return Order(order_dict)
@@ -230,8 +238,8 @@ def place_orders(action: Callable, orders: OrderBatch) -> OrderBatch:
                       order_to_dict(order))
             order.error = OrderSizeTooSmall
             orders.error.append(order)
-        except OrderError:
-            log.error("Unspecified order error: %s", order_to_dict(order))
+        except OrderError as oe:
+            log.error("Order error %s: %s", oe, order_to_dict(order))
             order.error = OrderError
             orders.error.append(order)
         else:
@@ -240,7 +248,8 @@ def place_orders(action: Callable, orders: OrderBatch) -> OrderBatch:
             else:
                 orders.pending.append(order_state)
 
-            time.sleep(round_down(0.1 + (random.random() % 0.2), 2))
+        if len(new_orders) > 1:
+            time.sleep(round_down(2 + random.random(), 2))
 
     return orders
 
@@ -261,7 +270,7 @@ def check_pending_orders(account: Account, orders: OrderBatch) -> OrderBatch:
             else:
                 orders.pending.append(state)
 
-        time.sleep(0.250)
+        time.sleep(0.25)
 
     return orders
 
@@ -281,8 +290,7 @@ def split_order(main_order: Order, max_size: Decimal, truncate=5) -> List[Order]
     return orders
 
 
-def check_expired_orders(account: Account, orders: OrderBatch,
-                         ttl: int) -> OrderBatch:
+def check_expired_orders(orders: OrderBatch, ttl: int) -> OrderBatch:
     now = int(time.time())
     pending = list(orders.pending)
     del orders.pending[:]
@@ -291,12 +299,6 @@ def check_expired_orders(account: Account, orders: OrderBatch,
         if now < order.timestamp + ttl:
             orders.pending.append(order)
             continue
-
-        try:
-            account.cancel_order(order.id)
-        except OrderError:
-            log.error("Error cancelling order: %s", order_to_dict(order))
-        time.sleep(0.250)
 
         order.error = OrderExpired
         orders.error.append(order)
@@ -307,19 +309,12 @@ def check_expired_orders(account: Account, orders: OrderBatch,
 def split_and_place_limit_order(account: Account, pair: Pair,
                                 orders: OrderBatch) -> OrderBatch:
 
-    main_order = new_order(account, pair.rule.order_template)
-
-    orders = check_pending_orders(account, orders)
-    orders = check_expired_orders(account, orders, pair.rule.order_ttl)
-
-    # Honor original order size.
-    if pair.size > 0:
-        main_order.size = min(pair.size - pair.filled_size, D(main_order.size))
-    else:
-        pair.size = D(main_order.size)
+    main_order = new_order(account, pair)
+    if pair.size == D(0):
+        pair.size = main_order.size
 
     split_order_size = pair.rule.split_order_size
-    if main_order.type == 'limit' and split_order_size > 0:
+    if main_order.type == 'limit' and split_order_size > D(0):
         max_order_size = split_order_size
     else:
         max_order_size = main_order.size
@@ -340,27 +335,26 @@ def split_and_place_limit_order(account: Account, pair: Pair,
 def place_limit_order(account: Account, pair: Pair):
     orders = OrderBatch()
     orders.pending = pair.pending_orders
+    orders = check_pending_orders(account, orders)
+    orders = check_expired_orders(orders, pair.rule.order_ttl)
     orders = split_and_place_limit_order(account, pair, orders)
 
     for order in orders.done:
-        pair.filled_size += order.filled_size
-        pair.executed_value += order.executed_value
+        pair.update_balance(order)
         if not order.settled:
             log.warning("Order done but not settled: %s", order_to_dict(order))
 
+    insufficient_funds = False
     for order in orders.error:
-        log.error("Order error: %s", order_to_dict(order))
         if order.error == InsufficientFunds:
-            try:
-                order_state = handle_insufficient_funds(account, order)
-            except OrderError:
-                log.warning("Order error: %s", order_to_dict(order))
-            else:
-                orders.pending.append(order_state)
+            log.warning("Insufficient funds to place order: %s",
+                        order_to_dict(order))
+            insufficient_funds = True
         elif order.error == OrderExpired:
             log.warning("Order expired: %s", order_to_dict(order))
-            pair.executed_value += order.executed_value
-            pair.filled_size += order.filled_size
+            account.cancel_order(order.id)
+            order = wait_for_order_to_complete(account, order)
+            pair.update_balance(order)
         else:
             log.warning("Error in order: %s", order_to_dict(order))
 
@@ -368,33 +362,54 @@ def place_limit_order(account: Account, pair: Pair):
     del orders.error[:]
 
     if pair.size != 0 and pair.filled_size >= pair.size:
-        pair.status = 'settled'
+        pair.status = 'done'
+        pair.settled = True
+
+    # If we are getting insufficient funds errors, it is better to just stop
+    # trying to place additional orders.
+    elif insufficient_funds:
+        pair.status = 'done'
+        pair.settled = False
+
+
+def wait_for_order_to_complete(account: Account, order: OrderState) -> OrderState:
+    order_id = order.id
+    ttl = 30
+    sleep_for = 0.5
+    ttl_range = int(ttl / sleep_for)
+    for i in range(ttl_range):
+        log.debug("Waiting for order %s to complete...", order_id)
+        order = account.get_order(order_id)
+        if order is not None and order.status == 'done':
+            break
+        time.sleep(sleep_for)
+
+    return order
 
 
 def place_market_order(account: Account, pair: Pair):
     order = copy.deepcopy(pair.rule.order_template)
     order.type = 'market'
-    if order.post_only:
-        order.post_only = None
-    if order.time_in_force:
-        order.time_in_force = None
+    order.post_only = None
+    order.time_in_force = None
 
-    order = new_order(account, order)
+    order = new_order(account, pair, template=order)
     orders = OrderBatch()
     orders.new.append(order)
     action = account.buy if order.type == 'buy' else account.sell
     orders = place_orders(action, orders)
 
-    for order_state in orders.pending:
-        log.error("Placed market order. It should not have been pending: %s",
-                  order_to_dict(order_state))
-        return
+    if orders.pending:
+        order_state = orders.pending[0]
+        order_state = wait_for_order_to_complete(account, order_state)
+        pair.settled = order_state.settled
+        if order_state.status != 'done':
+            log.error("Placed market order. It should not have been pending: %s",
+                      order_to_dict(order_state))
 
     if orders.done and orders.done[0].settled:
-        pair.filled_size += orders.done[0].filled_size
-        pair.executed_value += orders.done[0].executed_value
-        pair.status = 'settled'
-        return
+        pair.update_balance(orders.done[0])
+        pair.settled = True
 
     if orders.error and orders.error[0].error == InsufficientFunds:
         try:
@@ -402,68 +417,70 @@ def place_market_order(account: Account, pair: Pair):
         except OrderError:
             log.warning("Order error: %s", order_to_dict(order))
         else:
+            order_state = wait_for_order_to_complete(account, order_state)
+            pair.settled = order_state.settled
             if order_state.settled:
-                pair.status = 'settled'
-                return
+                pair.update_balance(order_state)
+
+    pair.status = 'done'
 
 
 def update_account_position(account: Account, pairs: Set[str],
                             new_pairs: List[str]):
-    for pair_id in new_pairs:
-        try:
-            pending_pair = pair_id in pairs
-        except KeyError:
-            pairs.add(pair_id)
+    for rule_id in new_pairs:
+        if rule_id in pairs:
+            for order in account.pairs[rule_id].pending_orders:
+                account.cancel_order(order.id)
         else:
-            if pending_pair:
-                for order in account.pairs[pair_id].pending_orders:
-                    account.cancel_order(order.id)
-                    time.sleep(0.250)
+            pairs.add(rule_id)
 
-    for pair_id in list(pairs):
-        pair = account.pairs[pair_id]
+    for rule_id in list(pairs):
+        pair = account.pairs[rule_id]
         update_pair_position(account, pair)
-        if pair.status in ('settled', 'error'):
+        if pair.status == 'done':
             for order in pair.pending_orders:
                 account.cancel_order(order.id)
-                time.sleep(0.25)
+                order_state = wait_for_order_to_complete(account, order)
+                pair.update_balance(order_state)
             del pair.pending_orders[:]
-            pair.position = pair.rule.position
-            pairs.remove(pair_id)
+            pairs.remove(rule_id)
 
 
-def update_accounts_positions(accounts: List[Account], q: queue.Queue):
-    '''
-    This functions runs as a separate thread.
-
-    It receives requests in the queue from the main thread.
-
-    It then places orders on the exchange so that each "pending pair"
-    transitions to the position indicated by a Twitter bot.
-    '''
+def update_accounts_positions(accounts: Dict[str, Account], q: queue.Queue):
+    """
+        This function runs in a separate thread. It receives requests in the
+        queue from the main thread. It places orders on the exchange so that
+        each "pending pair" transitions to the position indicated by a specific
+        tweet.
+    """
     pairs: Dict[str, Set[str]] = {}
     new_pairs: Dict[str, List[str]] = {}
 
+    log.info("Update positions thread starting...")
     while True:
         block = not pairs
         while True:
             try:
-                account_name, pair_id = q.get(block)
+                account_name, rule_id = q.get(block)
             except queue.Empty:
                 break
             else:
                 if account_name not in new_pairs:
                     new_pairs[account_name] = []
-                new_pairs[account_name].append(pair_id)
+                new_pairs[account_name].append(rule_id)
 
-        for account in accounts:
-            with account.lock:
+        for account in accounts.values():
+            with account.exchange.lock:
                 if account.name not in new_pairs:
                     new_pairs[account.name] = []
                 if account.name not in pairs:
                     pairs[account.name] = set()
-                update_account_position(account, pairs[account.name],
-                                        new_pairs[account.name])
+                try:
+                    update_account_position(account, pairs[account.name],
+                                            new_pairs[account.name])
+                finally:
+                    account.save_state()
+
                 del new_pairs[account.name]
                 if not pairs[account.name]:
                     del pairs[account.name]
@@ -472,34 +489,34 @@ def update_accounts_positions(accounts: List[Account], q: queue.Queue):
 
 
 def update_pair_position(account: Account, pair: Pair):
-    now = int(time.time())
     market_order = pair.rule.order_template.type == 'market'
-    if now > pair.expiration:
-        if pair.rule.market_fallback:
+
+    if pair.rule.order_template.type == 'limit':
+        if pair.status != 'done':
+            place_limit_order(account, pair)
+        if pair.settled:
+            return
+
+        # If we reach here, then the limit order was _not_ settled.
+        # Check if we should try using a market order as fallback.
+        if pair.status == 'done' or int(time.time()) > pair.expiration:
+            if not pair.rule.market_fallback:
+                return
+            # Before placing a market order, ensure no pending orders exist
+            for order in pair.pending_orders:
+                account.cancel_order(order.id)
+                order = wait_for_order_to_complete(account, order)
+                if order.status == 'done':
+                    pair.update_balance(order)
             pair.rule.market_fallback = False
             market_order = True
-        else:
-            pair.status = 'error'
-            return
 
     if market_order:
         place_market_order(account, pair)
-        if pair.status != 'settled':
-            pair.status = 'error'
-        return
-
-    if pair.rule.order_template.type == 'limit':
-#        if pair.rule.order_template.type == 'FOK':
-#            # place_limit_fok_order
-#            if pair.status != 'settled':
-#                pair.status = 'error'
-#            return
-
-        place_limit_order(account, pair)
 
 
-def handle_insufficient_funds(account: Account,
-                              order: Order) -> Union[OrderState, None]:
+def handle_insufficient_funds(account: Account, order: Order) \
+        -> Union[OrderState, None]:
     orig_order_size = order.size
     quote_currency = order.product_id.split('-', 1)[1]
     r = None
@@ -551,7 +568,8 @@ class TradingStateMachine:
             self._update_pairs(tweet)
 
         for pair in self.account.pairs.values():
-            self.queue.put((self.account.name, pair.id))
+            if pair.status != 'done':
+                self.queue.put((self.account.name, pair.rule_id))
 
     def _update_pairs(self, tweet: Tweet):
         log.debug("Got the following tweet: %s" % tweet.text)
@@ -563,11 +581,11 @@ class TradingStateMachine:
             # Relevant tweet. Do something with it...
             log.info("Rule match || @ %s: %s" % (tweet.screen_name, tweet.text))
 
-            pair = self.account.pairs.get(rule.pair_id)
+            pair = self.account.pairs.get(rule.id)
             if pair is None:
-                pair = Pair(rule.pair_id)
+                pair = Pair(rule.id, rule.order_template.product_id)
             pair.update(rule, tweet)
-            self.account.pairs[pair.id] = pair
+            self.account.pairs[pair.rule_id] = pair
 
 
 def get_tweets(twitter_client, handles, twitter_state: TwitterState) -> List[Tweet]:
@@ -585,7 +603,7 @@ def get_tweets(twitter_client, handles, twitter_state: TwitterState) -> List[Twe
             raw_tweets = twitter_client.get_user_timeline(
                 user_id=uid, exclude_replies=True, since_id=latest_id,
                 count=100)
-            time.sleep(0.5)
+            time.sleep(1)
             if not raw_tweets:
                 break
             for t in raw_tweets:
@@ -596,18 +614,6 @@ def get_tweets(twitter_client, handles, twitter_state: TwitterState) -> List[Twe
     return tweets
 
 
-def cancel_pending_orders(account: Account):
-    for order_id in account.pending_orders:
-        try:
-            account.cancel_order(order_id)
-        except OrderError as oe:
-            log.error("Error cancelling order: %s", oe)
-        else:
-            log.warning("Cancelled pending order %s on account %s. "
-                        "Cancelling...", order_id, account.name)
-        time.sleep(0.250)
-
-
 def trade_loop(app_state: AppState, accounts: Dict[str, Account], twitter_client,
                twitter_handles):
     next_status_ts = 0
@@ -615,7 +621,7 @@ def trade_loop(app_state: AppState, accounts: Dict[str, Account], twitter_client
     # Start thread to update pair positions on the different accounts.
     q = queue.Queue()
     t = threading.Thread(target=update_accounts_positions,
-                         args=(accounts.values(), q))
+                         args=(accounts, q))
     t.daemon = True
     t.start()
 
@@ -633,14 +639,15 @@ def trade_loop(app_state: AppState, accounts: Dict[str, Account], twitter_client
 
         # Trade
         for account in accounts.values():
-            with account.lock:
+            with account.exchange.lock:
+                account.forget_old_orders()
                 t = TradingStateMachine(account, app_state, q)
                 t.step(tweets)
 
         if now > next_status_ts:
             for account in accounts.values():
-                with account.lock:
-                    account.refresh_balance(status_update=True, status_csv=True)
+                with account.exchange.lock:
+                    account.refresh_balance(status_update=True)
             next_status_ts = now + 3600
 
         time.sleep(sleep_seconds)
@@ -658,6 +665,11 @@ def trade(args):
     try:
         # Saved application state
         app_state = load_app_state(args.state)
+        state_lock = threading.Lock()
+
+        def save_state():
+            with state_lock:
+                save_app_state(args.state, app_state)
 
         # Twitter client, and handles and keywords to monitor
         twitter_handles, twitter_keywords = set(), set()
@@ -678,11 +690,11 @@ def trade(args):
                 twitter_keywords.update(rule.keywords)
                 rules.append(rule)
 
-            account_state = app_state.accounts.get('name')
+            account_state = app_state.accounts.get(name)
             exchange = exchanges[acct['exchange']]
             if account_state is None:
                 account_state = AccountState(name, acct['initial_balance'])
-            account = Account(exchange, rules, account_state)
+            account = Account(exchange, rules, account_state, save_state)
             accounts[name] = account
     except Exception as exc:
         log.exception(exc)
@@ -693,11 +705,56 @@ def trade(args):
 
     log.info('Twitter/Exchange credentials verified.')
 
-    # Cancel any pending orders that may have persisted if the bot was not
-    # cleanly shut down.
+    # Cancel and remove any pending order that may have lingered if the bot
+    # was not properly shut down.
+    known_order_ids = set()
     for account in accounts.values():
-        with account.lock:
-            cancel_pending_orders(account)
+        with account.exchange.lock:
+            known_order_ids.update(account.pending_orders.keys())
+            account.cancel_pending_orders()
+            known_order_ids.update(account.done_orders.keys())
+            account.save_state()
+
+    # Try to find unconfirmed orders. Unconfirmed orders may have been created
+    # on the server, before we could get a confirmation (order id).
+    # There is no great way to find unconfirmed orders. In many cases, we cannot
+    # use a local order id to verify if a given local order matches a server
+    # order. However, we can look for it by listing recent server orders which
+    # match a given criteria, such as product_id, side, size, type, among others.
+    # If the server order id does not belong to a previous known order id, and
+    # the criteria matches, then there is a good chance that this is the order
+    # we are looking for.
+    for account in accounts.values():
+        if not account.unconfirmed_orders:
+            continue
+        lost_order = account.unconfirmed_orders.pop()
+        with account.exchange.lock:
+            order_found = False
+            for order_lister in (account.get_open_orders,
+                                 account.get_closed_orders):
+                server_orders = order_lister(
+                    product_id=lost_order.order.product_id,
+                    since=lost_order.timestamp - account.order_ttl
+                )
+                for server_order in server_orders:
+                    if server_order.id in known_order_ids:
+                        continue
+                    if not orders_match(server_order, lost_order.order):
+                        continue
+
+                    # This seems to be the right order. Cancel it.
+                    # Add the lost order to pending orders so that the account
+                    # balance is correctly updated.
+                    account.pending_orders[server_order.id] = lost_order
+                    account.cancel_order(server_order.id)
+                    order_found = True
+                    break
+
+            # The order was not found on the server. Refund any captured balance.
+            if not order_found:
+                account.balance[lost_order.currency] += lost_order.captured
+
+    save_state()
 
     exit_code = 1
     try:
@@ -708,7 +765,7 @@ def trade(args):
     except Exception as exc:
         log.error("Caught unhandled exception: %s", exc)
     finally:
-        save_app_state(args.state, app_state)
+        save_state()
         log.info("State has been saved. Exiting...")
         sys.exit(exit_code)
 

@@ -7,6 +7,7 @@ from .order import OrderTemplate
 class Rule:
     def __init__(self, config: dict):
         self.config = config
+        self.id: str = config.get('id')
         self.handles: List[str] = config.get('handles', [])
         self.keywords: List[str] = config.get('keywords', [])
         self.condition = config.get('condition', None)
@@ -16,14 +17,15 @@ class Rule:
         self.split_order_size = D(config.get('split_order_size', 0))
         self.tweet_ttl = int(config.get('tweet_ttl', 600))
         self.market_fallback: bool = config.get('market_fallback', False)
-        self.cancel_expired: bool = config.get('cancel_expired', False)
         self.position: str = config['position']
 
         self._validate()
         self.order_template = OrderTemplate(config['order'])
-        self.pair_id = self.order_template.product_id
 
     def _validate(self):
+        if self.id is None:
+            raise ValueError("A rule must have and id.")
+
         # Check condition
         try:
             eval(self.condition.format(

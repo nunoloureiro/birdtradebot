@@ -18,14 +18,19 @@ log = logging.getLogger(__name__)
 def handle_errors(f):
     def wrapper(*args, **kwargs):
         r = {'type': 'error', 'message': 'Unspecified error'}
-        for attempt in range(3):
+        max_tries = 4  # 1 attempt + 3 retries
+        for attempt in range(max_tries):
             try:
                 r = f(*args, **kwargs)
             except NetworkError as nete:
                 log.error("Network error while trying to place order: %s", nete)
                 r['orig_message'] = '%s' % nete
                 r['message'] = 'Network error'
-                time.sleep(10)
+                if attempt < max_tries - 1:
+                    sleep_for = 20 * (attempt + 1)
+                    log.info("Sleeping for %d seconds before trying again...",
+                             sleep_for)
+                    time.sleep(sleep_for)
                 continue
             except InsufficientFunds as ife:
                 r['orig_message'] = '%s' % ife
@@ -95,12 +100,13 @@ def convert_gdax_order_to_bitfinex(gdax_order):
     if 'price' in gdax_order:
         order['price'] = gdax_order['price']
     post_only = gdax_order.get('post_only')
+    params = {
+        'is_hidden': True
+    }
     if order_type == 'limit' and post_only:
-        order['params'] = {
-            'is_postonly': True
-        }
+        params['is_postonly'] = True
 
-    return order
+    return order, params
 
 
 def convert_bitfinex_order_reply_to_gdax(reply):
@@ -123,6 +129,7 @@ def convert_bitfinex_order_reply_to_gdax(reply):
 
     result = {
             'id': raw_reply['id'],
+            'client_oid': raw_reply['cid'],
             'size': raw_reply['original_amount'],
             'filled_size': raw_reply.get('executed_amount', '0.0'),
             'product_id': convert_raw_pair_to_gdax(raw_reply['symbol']),
@@ -183,7 +190,25 @@ class GDAXInterfaceAdapter:
     def get_order(self, order_id):
         o = self.bitfinex.fetch_order(order_id)
         return convert_bitfinex_order_reply_to_gdax(o)
- 
+
+    @handle_errors
+    def get_open_orders(self, since=None, symbol=None):
+        symbol = convert_pair_from_gdax(symbol)
+        orders = self.bitfinex.fetch_open_orders(since=since, symbol=symbol)
+        gdax_orders = []
+        for order in orders:
+            gdax_orders.append(convert_bitfinex_order_reply_to_gdax(order))
+        return gdax_orders
+
+    @handle_errors
+    def get_closed_orders(self, since=None, symbol=None):
+        symbol = convert_pair_from_gdax(symbol)
+        orders = self.bitfinex.fetch_closed_orders(since=since, symbol=symbol)
+        gdax_orders = []
+        for order in orders:
+            gdax_orders.append(convert_bitfinex_order_reply_to_gdax(order))
+        return gdax_orders
+
     @handle_errors
     def cancel_order(self, order_id):
         r = self.bitfinex.cancel_order(order_id)
@@ -191,12 +216,18 @@ class GDAXInterfaceAdapter:
 
     @handle_errors
     def buy(self, **gdax_order):
-        order = convert_gdax_order_to_bitfinex(gdax_order)
-        r = self.bitfinex.create_order(**order)
+        order, params = convert_gdax_order_to_bitfinex(gdax_order)
+        client_oid = gdax_order.get('client_oid')
+        if client_oid is not None:
+            params['cid'] = client_oid
+        r = self.bitfinex.create_order(**order, params=params)
         return convert_bitfinex_order_reply_to_gdax(r)
 
     @handle_errors
     def sell(self, **gdax_order):
-        order = convert_gdax_order_to_bitfinex(gdax_order)
-        r = self.bitfinex.create_order(**order)
+        order, params = convert_gdax_order_to_bitfinex(gdax_order)
+        client_oid = gdax_order.get('client_oid')
+        if client_oid is not None:
+            params['cid'] = client_oid
+        r = self.bitfinex.create_order(**order, params=params)
         return convert_bitfinex_order_reply_to_gdax(r)

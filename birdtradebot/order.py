@@ -1,4 +1,6 @@
 import time
+
+from decimal import Decimal
 from typing import Dict, List, Union
 
 from .utils import D
@@ -43,6 +45,7 @@ class Order:
         self.funds = D(order_dict.get('funds'))
         self.error = order_dict.get('error')
         self.raw_server_reply = None
+        self.client_oid = None
 
     def _validate(self):
         '''Validate order; follow https://docs.gdax.com/#orders for
@@ -119,6 +122,7 @@ class OrderState(Order):
     def __init__(self, state: Dict[str, str]):
         super().__init__(state)
         self.id = state['id']
+        self.client_oid = state.get('client_oid')
         self.filled_size = D(state['filled_size'])
         self.fill_fees = D(state.get('fill_fees', '0.0'))
         self.status = state['status']
@@ -128,6 +132,7 @@ class OrderState(Order):
         self.executed_value = D(state.get('executed_value', '0.0'))
         self.funds = D(self.funds)
         self.timestamp = int(time.time())
+        self.captured = D(0)
 
 
 class OrderTemplate(Order):
@@ -141,6 +146,15 @@ class OrderBatch:
         self.done: List[OrderState] = []
         self.pending: List[OrderState] = []
         self.error: List[Union[OrderState, Order]] = []
+
+
+class ActiveOrder:
+    def __init__(self, order: Order, currency: str, captured: Decimal):
+        self.order = order
+        self.status = None
+        self.currency = currency
+        self.captured = captured
+        self.timestamp = int(time.time())
 
 
 def order_to_dict(order: Order, strict=False) -> Dict[str, str]:
@@ -161,3 +175,15 @@ def dict_to_order(order_dict: Dict[str, str]) -> Order:
 
 def dict_to_order_state(order_state_dict: Dict[str, str]) -> OrderState:
     return OrderState(order_state_dict)
+
+
+def orders_match(a: Order, b: Order) -> bool:
+    if a.client_oid is not None and a.client_oid == b.client_oid:
+        return True
+    return (
+        a.side == b.side and
+        a.size == b.size and
+        a.product_id == b.product_id and
+        a.type == b.type and
+        a.price == b.price
+    )
