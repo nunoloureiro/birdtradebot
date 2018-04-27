@@ -59,7 +59,7 @@ except ImportError as e:
     raise
 
 try:
-    from twython import  Twython, TwythonError
+    from twython import Twython, TwythonError
 except ImportError as e:
     e.message = (
             'birdtradebot requires Twython. Install it with '
@@ -126,7 +126,7 @@ def prettify_dict(rule):
         Return value: rule string
     """
     return json.dumps(rule, sort_keys=False,
-                        indent=4, separators=(',', ': '))
+                      indent=4, separators=(',', ': '))
 
 
 def round_down(n, d=8):
@@ -282,6 +282,7 @@ def new_pair_context(rule, order, tweet):
 
     pair = {
         'pair': order['product_id'],
+        'enforce_handle': rule.get('enforce_handle', False),
 
         'order': order,
         'order_id': None,
@@ -754,6 +755,12 @@ class TradingStateMachine:
                              "Validation will occur shortly...",
                              tweet['id_str'], new_ctxt['order'])
                     ctxts[pair] = new_ctxt
+                    continue
+
+                if new_ctxt['enforce_handle'] and ctxt['handle'] != new_ctxt['handle']:
+                    log.warning("Ignoring tweet because this rule can only "
+                                "be changed by the original bot (%s)",
+                                ctxt['handle'])
                     continue
 
                 # The new context must be more recent than the existing one.
