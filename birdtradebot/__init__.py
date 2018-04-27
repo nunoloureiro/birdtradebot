@@ -477,7 +477,6 @@ class TradingStateMachine:
 
         # Issue orders for contexts
         for ctxt in pair_contexts.values():
-            handle = ctxt['handle']
             self._update_gdax_state(ctxt)
 
             now = int(time.time())
