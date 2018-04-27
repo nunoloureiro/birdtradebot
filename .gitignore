@@ -51,3 +51,4 @@ docs/_build/
 
 state.dat
 venv/
+/birdtradebot/config/local_config.py
