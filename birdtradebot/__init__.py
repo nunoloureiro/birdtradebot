@@ -261,7 +261,6 @@ class State:
                         self.path)
             return {
                 'twitter': {
-                    'pairs': {},
                     'handles': {},
                 },
                 'gdax': {
@@ -279,20 +278,25 @@ def new_pair_context(rule, order, tweet):
     created = int(dateutil.parser.parse(tweet['created_at']).strftime('%s'))
     retry_ttl = int(rule.get('retry_ttl_s', 200))
     tweet_ttl = int(rule.get('tweet_ttl_s', 3600))
+    primary_handle = rule.get('primary_handle')
+    handle = tweet['user']['screen_name']
+    n_handles = len(rule['handles'])
+    role = 'primary' if n_handles < 2 or handle == primary_handle else 'secondary'
 
     pair = {
         'pair': order['product_id'],
-        'enforce_handle': rule.get('enforce_handle', False),
-
+        'role': role,
+        'require_agreement': rule.get('require_agreement', False),
         'order': order,
         'order_id': None,
         'order_instance': None,
         'order_result': None,
         'order_next_check': 0,
 
-        'handle': tweet['user']['screen_name'],
+        'handle': handle,
+        'handles': {},
+
         'tweet_date': tweet['created_at'],
-        'id': tweet['id_str'],
 
         'position': None,
         'status': None,
@@ -303,6 +307,18 @@ def new_pair_context(rule, order, tweet):
         'retry_ttl': retry_ttl,
         'retry_expiration': 0,
         'expiration': created + tweet_ttl,
+    }
+    for h in rule['handles']:
+        pair['handles'][h] = {
+            'id': '0',
+            'position': None,
+            'role': None,
+        }
+    position = 'long' if order['side'] == 'buy' else 'short'
+    pair['handles'][handle] = {
+        'id': tweet['id_str'],
+        'position': position,
+        'role': role,
     }
 
     if int(time.time()) > pair['expiration']:
@@ -461,8 +477,8 @@ class TradingStateMachine:
 
         # Issue orders for contexts
         for ctxt in pair_contexts.values():
+            handle = ctxt['handle']
             self._update_gdax_state(ctxt)
-            self._update_twitter_state(ctxt['handle'], ctxt['id'], ctxt['pair'])
 
             now = int(time.time())
 
@@ -515,33 +531,26 @@ class TradingStateMachine:
         except KeyError:
             state['contexts'][pair] = new_ctxt
         else:
-            if new_ctxt['id'] > ctxt['id']:
+            handle = new_ctxt['handle']
+            handle_info = ctxt['handles'][handle]
+            new_handle_info = new_ctxt['handles'][handle]
+            if new_handle_info['id'] > handle_info['id']:
                 state['contexts'][pair] = new_ctxt
 
-    def _update_twitter_state(self, handle, new_id, pair=None):
+    def _update_twitter_state(self, handle, new_handle_id):
         handle = handle.lower()
         state = self.state['twitter']
         try:
             handle_id = state['handles'][handle]['id']
-            if pair:
-                pair_id = state['pairs'][pair]['id']
         except KeyError:
             if handle not in state:
                 state['handles'][handle] = {
-                    'id': new_id
-                }
-            if pair and pair not in state['pairs']:
-                state['pairs'][pair] = {
-                    'id': new_id
+                    'id': new_handle_id
                 }
             handle_id = state['handles'][handle]['id']
-            if pair:
-                pair_id = state['pairs'][pair]['id']
 
-        if int(new_id) > int(handle_id):
-            state['handles'][handle]['id'] = new_id
-        if pair and int(new_id) > int(pair_id):
-            state['pairs'][pair]['id'] = new_id
+        if int(new_handle_id) > int(handle_id):
+            state['handles'][handle]['id'] = new_handle_id
 
     def _cancel_order(self, order_id):
         if order_id is None:
@@ -757,22 +766,37 @@ class TradingStateMachine:
                     ctxts[pair] = new_ctxt
                     continue
 
-                if new_ctxt['enforce_handle'] and ctxt['handle'] != new_ctxt['handle']:
-                    log.warning("Ignoring tweet because this rule can only "
-                                "be changed by the original bot (%s)",
-                                ctxt['handle'])
+                # The new context must be more recent than the existing one.
+                handle = new_ctxt['handle']
+                handle_info = ctxt['handles'][handle]
+                new_handle_info = new_ctxt['handles'][handle]
+
+                if int(new_handle_info['id']) <= int(handle_info['id']):
+                    log.warning("Ignoring tweet with equal or older id "
+                                "(handle: %s, our tweet: %s new tweet: >= %s)",
+                                handle, handle_info['id'], new_handle_info['id'])
                     continue
 
-                # The new context must be more recent than the existing one.
-                if int(new_ctxt['id']) <= int(ctxt['id']):
-                    log.warning("Ignoring tweet with equal or older id "
-                                "(our tweet: %s new tweet: >= %s)",
-                                new_ctxt['id'], ctxt['id'])
-                    continue
+                # Merge handle info
+                ctxt['handles'][handle] = new_handle_info
+                for h in new_ctxt['handles'].keys():
+                    if h not in ctxt['handles']:
+                        ctxt['handles'][handle] = new_ctxt['handles']['handle']
+                new_ctxt['handles'] = ctxt['handles']
+
+                if new_ctxt['require_agreement']:
+                    position = new_handle_info['position']
+                    have_agreement = True
+                    for h_info in new_ctxt['handles'].values():
+                        have_agreement &= h_info['position'] == position
+
+                    if not have_agreement:
+                        log.warning("Ignoring tweet because an agreement could "
+                                    "not be reached.")
+                        continue
 
                 log.debug("Updating context %s with %s", ctxt, new_ctxt)
-                order_id = ctxt['order_id']
-                new_ctxt['order_id'] = order_id
+                new_ctxt['order_id'] = ctxt['order_id']
                 ctxts[pair] = new_ctxt
 
     def run(self):

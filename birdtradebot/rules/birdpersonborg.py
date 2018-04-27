@@ -35,6 +35,7 @@ rules = [
    },
    {
         'handles': ['BirdpersonBorg', 'SlowBirdPerson'],
+        'primary_handle': 'SlowBirdPerson',
         'condition': '"ETHEUR" in {tweet} and "long" in {tweet}.lower()',
         'retries': 1,
         'retry_ttl_s': 300,
@@ -52,8 +53,9 @@ rules = [
     },
     {
         'handles': ['BirdpersonBorg', 'SlowBirdPerson'],
+        'primary_handle': 'SlowBirdPerson',
+        'require_agreement': True,
         'condition': '"ETHEUR" in {tweet} and "short" in {tweet}.lower()',
-        'enforce_handle': True,
         'retries': 1,
         'retry_ttl_s': 300,
         'tweet_ttl_s': 600,
