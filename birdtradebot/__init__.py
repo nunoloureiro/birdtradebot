@@ -784,12 +784,16 @@ class TradingStateMachine:
                 new_ctxt['handles'] = ctxt['handles']
 
                 if new_ctxt['require_agreement']:
-                    position = new_handle_info['position']
+                    bot_position = new_handle_info['position']
                     have_agreement = True
-                    for h_info in new_ctxt['handles'].values():
-                        if h_info['position'] is None:
-                            continue
-                        have_agreement &= h_info['position'] == position
+                    for h in rule['handles']:
+                        try:
+                            p = new_ctxt['handles'][h]['position']
+                        except KeyError:
+                            pass
+                        else:
+                            if p is not None:
+                                have_agreement &= p == bot_position
 
                     if not have_agreement:
                         log.warning("Ignoring tweet because an agreement could "
