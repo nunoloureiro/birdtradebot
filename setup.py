@@ -4,7 +4,7 @@ setup(name='birdtradebot',
       version='0.3.0',
       description='trade crypto on GDAX based on tweets',
       url='https://github.com/nunoloureiro/birdtradebot',
-      download_url = 'https://github.com/nunoloureiro/birdtradebot/tarball/0.3.0',
+      download_url='https://github.com/nunoloureiro/birdtradebot/tarball/0.3.0',
       author='Joao Poupino / Nuno Loureiro',
       author_email='joao@probely.com, nuno@probely.com',
       license='MIT',
@@ -12,7 +12,7 @@ setup(name='birdtradebot',
       package_data={'birdtradebot': ['*.py', './rules/*']},
       zip_safe=True,
       install_requires=[
-          'twython', 'gdax', 'ccxt, ''pycryptodome', 'python-dateutil', 'ccxt'
+          'twython', 'gdax', 'ccxt', 'pycryptodome', 'python-dateutil'
       ],
       entry_points={
         'console_scripts': [
