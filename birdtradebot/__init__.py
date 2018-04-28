@@ -787,6 +787,8 @@ class TradingStateMachine:
                     position = new_handle_info['position']
                     have_agreement = True
                     for h_info in new_ctxt['handles'].values():
+                        if h_info['position'] is None:
+                            continue
                         have_agreement &= h_info['position'] == position
 
                     if not have_agreement:
