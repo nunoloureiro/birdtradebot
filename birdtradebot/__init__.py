@@ -530,7 +530,7 @@ class TradingStateMachine:
         except KeyError:
             state['contexts'][pair] = new_ctxt
         else:
-            handle = new_ctxt['handle']
+            handle = new_ctxt['handle'].lower()
             handle_info = ctxt['handles'][handle]
             new_handle_info = new_ctxt['handles'][handle]
             if new_handle_info['id'] > handle_info['id']:
@@ -766,7 +766,7 @@ class TradingStateMachine:
                     continue
 
                 # The new context must be more recent than the existing one.
-                handle = new_ctxt['handle']
+                handle = new_ctxt['handle'].lower()
                 handle_info = ctxt['handles'][handle]
                 new_handle_info = new_ctxt['handles'][handle]
 
@@ -780,7 +780,7 @@ class TradingStateMachine:
                 ctxt['handles'][handle] = new_handle_info
                 for h in new_ctxt['handles'].keys():
                     if h not in ctxt['handles']:
-                        ctxt['handles'][handle] = new_ctxt['handles']['handle']
+                        ctxt['handles'][handle] = new_ctxt['handles'][handle]
                 new_ctxt['handles'] = ctxt['handles']
 
                 if new_ctxt['require_agreement']:
@@ -818,8 +818,8 @@ class TradingStateMachine:
 def go():
     """ Entry point """
     # Print file's docstring if -h is invoked
-    parser = argparse.ArgumentParser(description=_help_intro, 
-                formatter_class=help_formatter)
+    parser = argparse.ArgumentParser(
+        description=_help_intro, formatter_class=help_formatter)
     subparsers = parser.add_subparsers(help=(
                 'subcommands; add "-h" or "--help" '
                 'after a subcommand for its parameters'),
