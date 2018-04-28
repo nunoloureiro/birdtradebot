@@ -279,7 +279,7 @@ def new_pair_context(rule, order, tweet):
     retry_ttl = int(rule.get('retry_ttl_s', 200))
     tweet_ttl = int(rule.get('tweet_ttl_s', 3600))
     primary_handle = rule.get('primary_handle')
-    handle = tweet['user']['screen_name']
+    handle = tweet['user']['screen_name'].lower()
     n_handles = len(rule['handles'])
     role = 'primary' if n_handles < 2 or handle == primary_handle else 'secondary'
 
