@@ -278,15 +278,12 @@ def new_pair_context(rule, order, tweet):
     created = int(dateutil.parser.parse(tweet['created_at']).strftime('%s'))
     retry_ttl = int(rule.get('retry_ttl_s', 200))
     tweet_ttl = int(rule.get('tweet_ttl_s', 3600))
-    primary_handle = rule.get('primary_handle')
     handle = tweet['user']['screen_name'].lower()
     n_handles = len(rule['handles'])
-    role = 'primary' if n_handles < 2 or handle == primary_handle else 'secondary'
 
     pair = {
         'pair': order['product_id'],
-        'role': role,
-        'require_agreement': rule.get('require_agreement', False),
+        'require_agreement': rule.get('require_agreement', []),
         'order': order,
         'order_id': None,
         'order_instance': None,
@@ -312,13 +309,11 @@ def new_pair_context(rule, order, tweet):
         pair['handles'][h] = {
             'id': '0',
             'position': None,
-            'role': None,
         }
     position = 'long' if order['side'] == 'buy' else 'short'
     pair['handles'][handle] = {
         'id': tweet['id_str'],
         'position': position,
-        'role': role,
     }
 
     if int(time.time()) > pair['expiration']:
@@ -765,28 +760,30 @@ class TradingStateMachine:
                     ctxts[pair] = new_ctxt
                     continue
 
-                # The new context must be more recent than the existing one.
                 handle = new_ctxt['handle'].lower()
+
+                # Merge handle info
+                for h in new_ctxt['handles'].keys():
+                    if h not in ctxt['handles']:
+                        ctxt['handles'][handle] = new_ctxt['handles'][handle]
+
+                # The new context must be more recent than the existing one.
                 handle_info = ctxt['handles'][handle]
                 new_handle_info = new_ctxt['handles'][handle]
-
                 if int(new_handle_info['id']) <= int(handle_info['id']):
                     log.warning("Ignoring tweet with equal or older id "
                                 "(handle: %s, our tweet: %s new tweet: >= %s)",
                                 handle, handle_info['id'], new_handle_info['id'])
                     continue
 
-                # Merge handle info
+                # Update handle position
                 ctxt['handles'][handle] = new_handle_info
-                for h in new_ctxt['handles'].keys():
-                    if h not in ctxt['handles']:
-                        ctxt['handles'][handle] = new_ctxt['handles'][handle]
                 new_ctxt['handles'] = ctxt['handles']
 
                 if new_ctxt['require_agreement']:
                     bot_position = new_handle_info['position']
                     have_agreement = True
-                    for h in rule['handles']:
+                    for h in new_ctxt['require_agreement']:
                         try:
                             p = new_ctxt['handles'][h]['position']
                         except KeyError:
