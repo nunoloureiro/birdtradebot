@@ -94,7 +94,7 @@ class AccountState:
         for cur, amount in initial_balance.items():
             self.balance[cur] = D(amount) if amount is not None else None
         self.pairs: Dict[str, Pair] = {}
-        self.pending_orders = Dict[str, ActiveOrder] = {}
+        self.pending_orders: Dict[str, ActiveOrder] = {}
         self.unconfirmed_orders: List[ActiveOrder] = []
         self.done_orders: Dict[str, OrderState] = set()
 
@@ -108,11 +108,12 @@ class Pair:
         self.filled_size = D(0)
         self.executed_value = D(0)
         self.rule: Rule = None
-        self.tweet: Tweet = None
         self.status: str = None
         self.settled: bool = False
         self.position = None
         self.expiration: int = 0
+        self.twitter: Dict[str, Tweet] = {}
+
         self.previous: Pair = None
         self.base_currency, self.quote_currency = product_id.split('-', 1)
 
@@ -121,17 +122,21 @@ class Pair:
         self.executed_value += order_state.executed_value
 
     def update(self, rule: Rule, tweet: Tweet):
-        if self.tweet is not None and self.tweet.id >= tweet.id:
-            log.info("Ignoring tweet with id: %s because because current id "
-                     "is newer: %s Tweet: %s, Tweet date: %s",
-                     tweet.id, self.tweet.id, tweet.text, tweet.created)
+        our_tweet = self.twitter.get(tweet.handle)
+        if our_tweet is not None and tweet.id <= our_tweet.id:
+            log.info("Ignoring tweet with id %s. Current id %s for "
+                     "handle %s is newer. Text: %s. Date: %s",
+                     tweet.id, our_tweet.id, tweet.handle, tweet.text,
+                     tweet.created)
             return
 
-        log.info("Updating pair %s based on new tweet info: %s",
-                 self.rule_id, tweet.text)
+        tweet.position = 'long' if rule.order_template.side == 'buy' else 'short'
+        log.info("Updating pair %s based on new tweet info: %s, position: %s",
+                 self.rule_id, tweet.text, tweet.position)
 
         self.previous = deepcopy(self)
-        self.tweet = tweet
+
+        self.twitter[tweet.handle] = tweet
         self.rule = rule
         self.expiration = tweet.created_ts + rule.ttl
         self.size = D(0)
@@ -140,6 +145,20 @@ class Pair:
         self.status = None
         self.position = None
         self.settled = False
+
+        if rule.agreement_handles:
+            have_agreement = True
+            for h in rule.agreement_handles:
+                try:
+                    saved_tweet = self.twitter[h]
+                except KeyError:
+                    pass
+                else:
+                    have_agreement &= tweet.position == saved_tweet.position
+            if not have_agreement:
+                log.warning("Ignoring tweet because an agreement could "
+                            "not be reached.")
+                return
 
         if int(time.time()) > self.expiration:
             log.warning("Got new advice from an expired tweet. Ignoring... "

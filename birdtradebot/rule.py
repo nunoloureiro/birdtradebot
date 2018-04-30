@@ -18,6 +18,10 @@ class Rule:
         self.tweet_ttl = int(config.get('tweet_ttl', 600))
         self.market_fallback: bool = config.get('market_fallback', False)
         self.position: str = config['position']
+        self.agreement_handles = config.get('agreement_handles', [])
+        self.agreement_handles: List[str] = [
+            h.lower() for h in self.agreement_handles
+        ]
 
         self._validate()
         self.order_template = OrderTemplate(config['order'])
