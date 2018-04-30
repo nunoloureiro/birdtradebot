@@ -310,6 +310,7 @@ def new_pair_context(rule, order, tweet):
             'id': '0',
             'position': None,
         }
+    pair['require_agreement'] = [handle.lower() for handle in pair['require_agreement']]
     position = 'long' if order['side'] == 'buy' else 'short'
     pair['handles'][handle] = {
         'id': tweet['id_str'],
