@@ -1,9 +1,11 @@
 import time
 
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 from typing import Dict, List, Union
 
-from .utils import D
+import dateutil.parser
+
+from utils import D
 
 order_vocab = frozenset([
     'client_oid', 'type', 'side', 'product_id', 'stp',
@@ -40,9 +42,16 @@ class Order:
         self.post_only = order_dict.get('post_only', False)
         self.side = order_dict.get('side')
         self.product_id = order_dict.get('product_id')
-        self.price = D(order_dict.get('price'))
-        self.size = D(order_dict.get('size'))
-        self.funds = D(order_dict.get('funds'))
+        self.price = order_dict.get('price')
+        self.size = order_dict.get('size')
+        self.funds = order_dict.get('funds')
+
+        for attr in ('price', 'size', 'funds'):
+            try:
+                setattr(self, attr, D(getattr(self, attr)))
+            except InvalidOperation:
+                pass
+
         self.error = order_dict.get('error')
         self.raw_server_reply = None
         self.client_oid = None
@@ -121,7 +130,7 @@ class Order:
 class OrderState(Order):
     def __init__(self, state: Dict[str, str]):
         super().__init__(state)
-        self.id = state['id']
+        self.id = str(state['id'])
         self.client_oid = state.get('client_oid')
         self.filled_size = D(state['filled_size'])
         self.fill_fees = D(state.get('fill_fees', '0.0'))
@@ -131,7 +140,9 @@ class OrderState(Order):
         self.price = D(state.get('price', '0.0'))
         self.executed_value = D(state.get('executed_value', '0.0'))
         self.funds = D(self.funds)
-        self.timestamp = int(time.time())
+
+        _date = state['created_at']
+        self.timestamp = int(dateutil.parser.parse(_date).strftime('%s'))
         self.captured = D(0)
 
 
@@ -151,6 +162,7 @@ class OrderBatch:
 class ActiveOrder:
     def __init__(self, order: Order, currency: str, captured: Decimal):
         self.order = order
+        self.order_state = None
         self.status = None
         self.currency = currency
         self.captured = captured

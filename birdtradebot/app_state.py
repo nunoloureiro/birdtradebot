@@ -3,8 +3,10 @@ import os
 
 import jsonpickle
 
-from .twitter import TwitterState
-from .exchange import AccountState
+from typing import Dict
+
+from twitter import TwitterState
+from exchange import AccountState
 
 log = logging.getLogger(__name__)
 
@@ -37,5 +39,5 @@ def save_app_state(path, state):
 
 class AppState:
     def __init__(self):
-        self.twitter: TwitterState = {}
-        self.accounts: AccountState = {}
+        self.twitter = TwitterState()
+        self.accounts: Dict[str, AccountState] = {}

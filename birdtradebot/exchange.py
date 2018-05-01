@@ -8,8 +8,8 @@ from typing import Dict, List, Union, Callable
 
 import gdax
 
-from .exchanges import bitfinex
-from .order import (
+from exchanges import bitfinex
+from order import (
     Order,
     OrderState,
     ActiveOrder,
@@ -18,9 +18,9 @@ from .order import (
     OrderSizeTooSmall,
     OrderNotFound,
     order_to_dict)
-from .rule import Rule
-from .twitter import Tweet
-from .utils import round_down, D
+from rule import Rule
+from twitter import Tweet
+from utils import round_down, D
 
 log = logging.getLogger(__name__)
 
@@ -49,14 +49,14 @@ class Exchange:
         secret = config.get('secret')
         passphrase = config.get('passphrase')
 
-        if key is None or secret is None:
+        if not key or not secret:
             raise ValueError('Please set both "key" and "secret" attributes')
-        if self.type == 'gdax' and passphrase is None:
+        if self.type == 'gdax' and not passphrase:
             raise ValueError('GDAX exchange requires the "passphrase" attribute')
 
         self.taker_fee = exchanges[self.type].get('taker_fee', D(0))
         self.maker_fee = exchanges[self.type].get('marker_fee', D(0))
-        self.auth = exchanges[self.type]['auth'](*config[1:])
+        self.auth = exchanges[self.type]['auth'](key, secret, passphrase)
 
         public = exchanges[self.type].get('public')
         if public is not None:
@@ -75,6 +75,7 @@ class Exchange:
         return self.balance
 
     def create_client_oid(self):
+        return None
         if self.type == 'gdax':
             return None  # str(uuid.uuid4())
         elif self.type == 'bitfinex':
@@ -96,12 +97,11 @@ class AccountState:
         self.pairs: Dict[str, Pair] = {}
         self.pending_orders: Dict[str, ActiveOrder] = {}
         self.unconfirmed_orders: List[ActiveOrder] = []
-        self.done_orders: Dict[str, OrderState] = set()
+        self.done_orders: Dict[str, OrderState] = {}
 
 
 class Pair:
-    def __init__(self, rule_id: str, product_id: str):
-        self.rule_id = rule_id
+    def __init__(self, product_id: str):
         self.product_id = product_id
         self.pending_orders: List[OrderState] = []
         self.size = D(0)
@@ -113,38 +113,27 @@ class Pair:
         self.position = None
         self.expiration: int = 0
         self.twitter: Dict[str, Tweet] = {}
-
+        self.updated = False
         self.previous: Pair = None
         self.base_currency, self.quote_currency = product_id.split('-', 1)
 
     def update_balance(self, order_state: OrderState):
+        import pdb; pdb.Pdb(nosigint=True).set_trace()
+        log.debug("Updating balance from order: %s", order_to_dict(order_state))
         self.filled_size += order_state.filled_size
         self.executed_value += order_state.executed_value
 
     def update(self, rule: Rule, tweet: Tweet):
         our_tweet = self.twitter.get(tweet.handle)
         if our_tweet is not None and tweet.id <= our_tweet.id:
-            log.info("Ignoring tweet with id %s. Current id %s for "
-                     "handle %s is newer. Text: %s. Date: %s",
-                     tweet.id, our_tweet.id, tweet.handle, tweet.text,
+            log.info("Saved tweet id is more recent than new tweet id (%s >= %s). "
+                    "Handle: %s. Text: %s. Date: %s",
+                     our_tweet.id, tweet.id, tweet.handle, tweet.text,
                      tweet.created)
             return
 
         tweet.position = 'long' if rule.order_template.side == 'buy' else 'short'
-        log.info("Updating pair %s based on new tweet info: %s, position: %s",
-                 self.rule_id, tweet.text, tweet.position)
-
-        self.previous = deepcopy(self)
-
         self.twitter[tweet.handle] = tweet
-        self.rule = rule
-        self.expiration = tweet.created_ts + rule.ttl
-        self.size = D(0)
-        self.filled_size = D(0)
-        self.executed_value = D(0)
-        self.status = None
-        self.position = None
-        self.settled = False
 
         if rule.agreement_handles:
             have_agreement = True
@@ -160,16 +149,30 @@ class Pair:
                             "not be reached.")
                 return
 
+        log.info("Updating pair %s based on new tweet info: %s, position: %s",
+                 self.product_id, tweet.text, tweet.position)
+        self.updated = True
+        self.previous = deepcopy(self)
+        self.rule = rule
+        self.expiration = tweet.created_ts + rule.tweet_ttl
+        self.size = D(0)
+        self.filled_size = D(0)
+        self.executed_value = D(0)
+        self.status = None
+        self.position = None
+        self.settled = False
+
         if int(time.time()) > self.expiration:
             log.warning("Got new advice from an expired tweet. Ignoring... "
                         "Tweet date: %s, order: %s", tweet.created,
-                        rule.order_template)
+                        order_to_dict(rule.order_template))
             self.status = 'done'
             self.settled = False
             return
 
+        import pdb; pdb.Pdb(nosigint=True).set_trace()
         log.info("Updating pair %s with tweet id: %s, tweet text: %s",
-                 self.rule_id, tweet.id, tweet.text)
+                 self.product_id, tweet.id, tweet.text)
 
 
 class Account:
@@ -208,10 +211,12 @@ class Account:
             Return value: dictionary mapping currency to account information
         """
         balance = self.get_accounts()
+        exchange_balance = self.exchange.balance
         if status_update:
-            balance_str = ', '.join('%s: %s' % (p, round_down(a))
-                                    for p, a in balance.items())
-            log.info('Current balance in wallet: %s' % balance_str)
+            balance_str = ', '.join('%s: %s (total: %s)' % (
+                p, round_down(a), round_down(exchange_balance[p], 2))
+                for p, a in balance.items())
+            log.info('Current balance in account: %s' % balance_str)
 
         return balance
 
@@ -219,23 +224,31 @@ class Account:
         return self.exchange.public.get_product_order_book(*args, **kwargs)
 
     def get_accounts(self) -> Dict[str, Decimal]:
-        currencies = self.exchange.auth.get_accounts()
-        for name, exchange_amount in currencies.items():
-            amount = self.balance[name]
+        exchange_balance = self.exchange.refresh_balance()
+        for symbol, exchange_amount in exchange_balance.items():
+            if symbol not in self.balance:
+                self.balance[symbol] = D('0')
+            amount = self.balance[symbol]
             if amount is None or not self.virtual:
-                amount = D(exchange_amount)
-            self.balance[name] = min(amount, exchange_amount)
+                amount = exchange_amount
+            self.balance[symbol] = min(amount, exchange_amount)
         return self.balance
 
-    def get_open_orders(self, product_id=None, since=None):
+    def get_open_orders(self, since=None, product_id=None):
         if self.exchange.type != 'bitfinex':
             return []
-        return self.exchange.auth.get_open_orders(product_id, since)
+        return [
+            OrderState(o)
+            for o in self.exchange.auth.get_open_orders(since, product_id)
+        ]
 
-    def get_closed_orders(self, product_id=None, since=None):
+    def get_closed_orders(self, since=None, product_id=None):
         if self.exchange.type != 'bitfinex':
             return []
-        return self.exchange.auth.get_closed_orders(product_id, since)
+        return [
+            OrderState(o)
+            for o in self.exchange.auth.get_closed_orders(since, product_id)
+        ]
 
     def _wait_for_order(self, _id: str, ttl: int) -> Union[OrderState, None]:
         order_state = None
@@ -261,6 +274,7 @@ class Account:
         return order_state
 
     def _update_balance_from_order(self, order_state: OrderState):
+        import pdb; pdb.Pdb(nosigint=True).set_trace()
         if (not self.virtual or
                 order_state.id not in self.pending_orders or
                 order_state.status != 'done'):
@@ -286,12 +300,16 @@ class Account:
         self._handle_errors(r)
         order_state = OrderState(r)
         self._update_balance_from_order(order_state)
-        return r
+        return order_state
 
     def cancel_order(self, order_id):
+        import pdb; pdb.Pdb(nosigint=True).set_trace()
         log.debug("Cancelling order %s...", order_id)
         r = self.exchange.auth.cancel_order(order_id)
-        self._handle_errors(r)
+        try:
+            self._handle_errors(r)
+        except OrderNotFound:
+            pass
         if order_id in self.pending_orders:
             order_state = self._wait_for_order(order_id, ttl=30)
             if order_state is not None:
@@ -342,6 +360,7 @@ class Account:
         return captured
 
     def _order_action(self, order: Order, action: Callable) -> OrderState:
+        import pdb; pdb.Pdb(nosigint=True).set_trace()
         order.client_oid = self.exchange.create_client_oid()
         order_dict = order_to_dict(order, strict=True)
         if order.type == 'market' and order.price is not None:
@@ -356,7 +375,8 @@ class Account:
                           self.unconfirmed_orders)
                 del self.unconfirmed_orders[:]
             self.unconfirmed_orders.append(active)
-            log.debug("Added order to unconfirmed orders list...")
+            log.debug("Added order %s to unconfirmed orders list...",
+                      order_to_dict(order))
             self.save_state()
             r = action(**order_dict)
             order.raw_server_reply = r
@@ -364,12 +384,13 @@ class Account:
             order_state = OrderState(r)
         finally:
             if self.unconfirmed_orders:
-                order = self.unconfirmed_orders.pop()
+                active = self.unconfirmed_orders.pop()
                 log.debug("Cleared unconfirmed orders list...")
                 if order_state is not None:
-                    self.pending_orders[order_state.id] = order
+                    active.order_state = order_state
+                    self.pending_orders[order_state.id] = active
                 else:
-                    self.balance[order.currency] += order.captured
+                    self.balance[active.currency] += active.captured
             self.save_state()
 
         return order_state

@@ -33,7 +33,6 @@ bird_eth_rules = [
         'order_ttl': 60,
         'tweet_ttl': 600,
         'market_fallback': True,
-        'position': 'long',
         'id': 'bird|ETH-EUR',
         'order': {
             'side': 'buy',
@@ -50,7 +49,6 @@ bird_eth_rules = [
         'order_ttl': 60,
         'tweet_ttl': 600,
         'market_fallback': True,
-        'position': 'short',
         'id': 'bird|ETH-EUR',
         'order': {
             'side': 'sell',
@@ -89,6 +87,6 @@ accounts = {
 }
 
 try:
-    from local_config import *
+    from .local_config import *
 except ImportError:
     pass

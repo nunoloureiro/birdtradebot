@@ -43,7 +43,8 @@ def handle_errors(f):
                 msg = '%s' % be
                 r['orig_message'] = msg
 
-                if 'minimum size for' in msg:
+                if ('minimum size for' in msg.lower() or
+                    'amount must be positive' in msg.lower()):
                     r['message'] = 'Order size is too small.'
                     break
 

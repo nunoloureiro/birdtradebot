@@ -9,13 +9,9 @@ log = logging.getLogger(__name__)
 
 class Tweet:
     def __init__(self, tweet: Dict):
-        self.id: str = tweet['id']
-        self.text: str = tweet['text']
-        self.handle: str = tweet['handle'].lower()
-        try:
-            self.screen_name = tweet['user']['screen_name']
-        except KeyError:
-            self.screen_name = None
+        self.id: str = tweet['id_str']
+        self.text: str = tweet['text'].replace('\r', '').replace('\n', '')
+        self.handle: str = tweet['user']['screen_name'].lower()
         self.created = tweet['created_at']
         self.created_ts = int(dateutil.parser.parse(self.created).strftime('%s'))
         self.retweeted_status = tweet.get('retweeted_status')
@@ -36,6 +32,7 @@ class TwitterState:
         try:
             current = self.handles[tweet.handle]
         except KeyError:
-            current = Tweet
+            current = tweet
+
         if tweet.id >= current.id:
-            self.handles[tweet.handle] = Tweet
+            self.handles[tweet.handle] = tweet
