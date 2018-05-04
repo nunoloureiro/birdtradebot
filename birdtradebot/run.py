@@ -794,7 +794,6 @@ def trade(args):
     # If the server order id does not belong to a previous known order id, and
     # the criteria matches, then there is a good chance that this is the order
     # we are looking for.
-    import pdb; pdb.Pdb(nosigint=True).set_trace()
     for account in accounts.values():
         if not account.unconfirmed_orders:
             continue
