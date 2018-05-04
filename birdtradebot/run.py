@@ -266,8 +266,9 @@ def check_pending_orders(account: Account, orders: OrderBatch) -> OrderBatch:
     for order in pending:
         try:
             state = account.get_order(order.id)
-        except OrderNotFound:
+        except OrderNotFound as onf:
             order.error = OrderNotFound
+            log.warning("Order %s not found: %s", order.id, onf)
             orders.error.append(order)
         else:
             if state.status == 'done':
@@ -342,12 +343,13 @@ def split_and_place_limit_order(account: Account, pair: Pair,
 def check_error_orders(account: Account, pair: Pair, orders: OrderBatch):
     insufficient_funds = False
     for order in orders.error:
-        if order.error == InsufficientFunds:
+        if order.error in (InsufficientFunds, OrderSizeTooSmall):
             log.warning("Insufficient funds to place order: %s",
                         order_to_dict(order))
             insufficient_funds = True
-        elif order.error == OrderExpired:
-            log.warning("Order expired: %s", order_to_dict(order))
+        else:
+            log.warning("Error in order %s. Cancelling. %s",
+                        order.id, order_to_dict(order))
             try:
                 account.cancel_order(order.id)
             except OrderNotFound:
@@ -356,10 +358,6 @@ def check_error_orders(account: Account, pair: Pair, orders: OrderBatch):
                 order = wait_for_order_to_complete(account, order)
                 if order is not None:
                     pair.update_balance(order)
-        elif order.error == OrderSizeTooSmall:
-            insufficient_funds = True
-        else:
-            log.warning("Error in order: %s", order_to_dict(order))
 
     del orders.error[:]
 
@@ -518,7 +516,6 @@ def update_accounts_positions(accounts: Dict[str, Account], q: queue.Queue):
             except queue.Empty:
                 break
             else:
-                import pdb; pdb.Pdb(nosigint=True).set_trace()
                 if account_name not in new_pairs:
                     new_pairs[account_name] = set()
                 new_pairs[account_name].add(product_id)
@@ -543,7 +540,6 @@ def update_accounts_positions(accounts: Dict[str, Account], q: queue.Queue):
 
 
 def update_pair_position(account: Account, pair: Pair):
-    import pdb; pdb.Pdb(nosigint=True).set_trace()
 
     market_order = pair.rule.order_template.type == 'market'
 

@@ -118,7 +118,6 @@ class Pair:
         self.base_currency, self.quote_currency = product_id.split('-', 1)
 
     def update_balance(self, order_state: OrderState):
-        import pdb; pdb.Pdb(nosigint=True).set_trace()
         log.debug("Updating balance from order: %s", order_to_dict(order_state))
         self.filled_size += order_state.filled_size
         self.executed_value += order_state.executed_value
@@ -127,7 +126,7 @@ class Pair:
         our_tweet = self.twitter.get(tweet.handle)
         if our_tweet is not None and tweet.id <= our_tweet.id:
             log.info("Saved tweet id is more recent than new tweet id (%s >= %s). "
-                    "Handle: %s. Text: %s. Date: %s",
+                     "Handle: %s. Text: %s. Date: %s",
                      our_tweet.id, tweet.id, tweet.handle, tweet.text,
                      tweet.created)
             return
@@ -170,7 +169,6 @@ class Pair:
             self.settled = False
             return
 
-        import pdb; pdb.Pdb(nosigint=True).set_trace()
         log.info("Updating pair %s with tweet id: %s, tweet text: %s",
                  self.product_id, tweet.id, tweet.text)
 
@@ -259,9 +257,9 @@ class Account:
             order_state = None
             try:
                 order_state = self.get_order(_id)
-            except OrderNotFound:
-                log.error("Server said order %s was not found. "
-                          "This should have not happened.", _id)
+            except OrderNotFound as onf:
+                log.error("Server said order %s was not found: %s "
+                          "This should have not happened.", _id, onf)
                 break
             except OrderError as oerr:
                 log.error("Unspecified error while trying to fetch order "
@@ -274,7 +272,6 @@ class Account:
         return order_state
 
     def _update_balance_from_order(self, order_state: OrderState):
-        import pdb; pdb.Pdb(nosigint=True).set_trace()
         if (not self.virtual or
                 order_state.id not in self.pending_orders or
                 order_state.status != 'done'):
@@ -303,7 +300,6 @@ class Account:
         return order_state
 
     def cancel_order(self, order_id):
-        import pdb; pdb.Pdb(nosigint=True).set_trace()
         log.debug("Cancelling order %s...", order_id)
         r = self.exchange.auth.cancel_order(order_id)
         try:
@@ -360,7 +356,6 @@ class Account:
         return captured
 
     def _order_action(self, order: Order, action: Callable) -> OrderState:
-        import pdb; pdb.Pdb(nosigint=True).set_trace()
         order.client_oid = self.exchange.create_client_oid()
         order_dict = order_to_dict(order, strict=True)
         if order.type == 'market' and order.price is not None:
