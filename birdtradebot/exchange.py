@@ -230,6 +230,15 @@ class Account:
             if amount is None or not self.virtual:
                 amount = exchange_amount
             self.balance[symbol] = min(amount, exchange_amount)
+
+        # Make sure that the currency for every pair in this account
+        # has a balance. This balance will be used to determine the amount
+        # to buy or sell when creating exchange orders.
+        for pair in self.pairs.keys():
+            for symbol in pair.split('-'):
+                if symbol not in self.balance:
+                    self.balance[symbol] = D('0')
+
         return self.balance
 
     def get_open_orders(self, since=None, product_id=None):
