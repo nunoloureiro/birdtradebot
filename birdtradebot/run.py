@@ -716,6 +716,7 @@ def trade_loop(app_state: AppState, accounts: Dict[str, Account], twitter_client
                 account.forget_old_orders()
                 t = TradingStateMachine(account, app_state, q)
                 t.step(tweets, stepnum)
+                account.save_state()
 
         if now > next_status_ts:
             for account in accounts.values():
@@ -729,6 +730,7 @@ def trade_loop(app_state: AppState, accounts: Dict[str, Account], twitter_client
 
 def trade(args):
     from config import config
+
     try:
         # Saved application state
         app_state = load_app_state(args.state)
