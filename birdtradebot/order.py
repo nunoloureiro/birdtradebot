@@ -143,7 +143,6 @@ class OrderState(Order):
 
         _date = state['created_at']
         self.timestamp = int(dateutil.parser.parse(_date).strftime('%s'))
-        self.captured = D(0)
 
 
 class OrderTemplate(Order):

@@ -11,6 +11,7 @@ class Rule:
         self.keywords: List[str] = config.get('keywords', [])
         self.condition = config.get('condition', None)
         self.order_ttl = int(config.get('order_ttl', 60))
+        self.ttl = int(config.get('ttl', 600))
         self.check_interval = int(config.get('check_interval', 30))
         self.split_order_size = D(config.get('split_order_size', 0))
         self.tweet_ttl = int(config.get('tweet_ttl', 600))

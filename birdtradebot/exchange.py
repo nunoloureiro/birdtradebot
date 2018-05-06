@@ -67,11 +67,21 @@ class Exchange:
         self.balance = {}
         self.lock = threading.Lock()
 
-    def refresh_balance(self):
+    def refresh_balance(self, extra_pairs=None):
         reply = self.auth.get_accounts()
         for currency in reply:
             name = currency['currency']
             self.balance[name] = D(currency['available'])
+
+        # Make sure that the currency for every extra pair has a balance.
+        # This balance will be used to determine the amount to buy or sell when
+        # creating exchange orders.
+        pairs = extra_pairs if extra_pairs else []
+        for pair in pairs:
+            for symbol in pair.split('-'):
+                if symbol not in self.balance:
+                    self.balance[symbol] = D('0')
+
         return self.balance
 
     def create_client_oid(self):
@@ -116,9 +126,11 @@ class Pair:
         self.updated = False
         self.previous: Pair = None
         self.base_currency, self.quote_currency = product_id.split('-', 1)
+        self.errors = 0
 
     def update_balance(self, order_state: OrderState):
-        log.debug("Updating balance from order: %s", order_to_dict(order_state))
+        log.debug("Updating pair %s balance from order %s: %s",
+                  self.product_id, order_state.id, order_to_dict(order_state))
         self.filled_size += order_state.filled_size
         self.executed_value += order_state.executed_value
 
@@ -150,10 +162,12 @@ class Pair:
 
         log.info("Updating pair %s based on new tweet info: %s, position: %s",
                  self.product_id, tweet.text, tweet.position)
+        now = int(time.time())
         self.updated = True
+        self.errors = 0
         self.previous = deepcopy(self)
         self.rule = rule
-        self.expiration = tweet.created_ts + rule.tweet_ttl
+        self.expiration = now + rule.ttl
         self.size = D(0)
         self.filled_size = D(0)
         self.executed_value = D(0)
@@ -161,7 +175,7 @@ class Pair:
         self.position = None
         self.settled = False
 
-        if int(time.time()) > self.expiration:
+        if now > tweet.created_ts + rule.tweet_ttl:
             log.warning("Got new advice from an expired tweet. Ignoring... "
                         "Tweet date: %s, order: %s", tweet.created,
                         order_to_dict(rule.order_template))
@@ -214,7 +228,7 @@ class Account:
             balance_str = ', '.join('%s: %s (total: %s)' % (
                 p, round_down(a), round_down(exchange_balance[p], 2))
                 for p, a in balance.items())
-            log.info('Current balance in account: %s' % balance_str)
+            log.info('Current balance in %s: %s' % (self.name, balance_str))
 
         return balance
 
@@ -222,7 +236,8 @@ class Account:
         return self.exchange.public.get_product_order_book(*args, **kwargs)
 
     def get_accounts(self) -> Dict[str, Decimal]:
-        exchange_balance = self.exchange.refresh_balance()
+        exchange_balance = self.exchange.refresh_balance(
+                extra_pairs=self.pairs.keys())
         for symbol, exchange_amount in exchange_balance.items():
             if symbol not in self.balance:
                 self.balance[symbol] = D('0')
@@ -230,14 +245,6 @@ class Account:
             if amount is None or not self.virtual:
                 amount = exchange_amount
             self.balance[symbol] = min(amount, exchange_amount)
-
-        # Make sure that the currency for every pair in this account
-        # has a balance. This balance will be used to determine the amount
-        # to buy or sell when creating exchange orders.
-        for pair in self.pairs.keys():
-            for symbol in pair.split('-'):
-                if symbol not in self.balance:
-                    self.balance[symbol] = D('0')
 
         return self.balance
 
@@ -257,15 +264,15 @@ class Account:
             for o in self.exchange.auth.get_closed_orders(since, product_id)
         ]
 
-    def _wait_for_order(self, _id: str, ttl: int) -> Union[OrderState, None]:
+    def wait_for_order(self, _id: str, ttl: int) -> Union[OrderState, None]:
+        log.info("Waiting for order %s to complete...", _id)
         order_state = None
-        sleep_for = 0.5
-        ttl_range = int(ttl / sleep_for)
-        for i in range(ttl_range):
-            time.sleep(sleep_for)
+        start_ts = time.time()
+        elapsed = 0
+        while elapsed < ttl:
             order_state = None
             try:
-                order_state = self.get_order(_id)
+                order_state = self.get_order(_id, ttl=ttl)
             except OrderNotFound as onf:
                 log.error("Server said order %s was not found: %s "
                           "This should have not happened.", _id, onf)
@@ -274,21 +281,39 @@ class Account:
                 log.error("Unspecified error while trying to fetch order "
                           "%s: %s", _id, oerr)
             else:
-                if order_state.status == 'done':
-                    log.info("Order %s done after %d seconds.", _id, i)
+                if order_state is None:
+                    log.error("Could not get order state for order %s!", _id)
                     break
+
+                if order_state.status == 'done':
+                    log.info("Order %s done after %s seconds.", _id, elapsed)
+                    break
+                else:
+                    log.info("Order %s is not yet done. %s seconds elapsed",
+                             _id, elapsed)
+
+            time.sleep(2)
+            elapsed = time.time() - start_ts
 
         return order_state
 
     def _update_balance_from_order(self, order_state: OrderState):
-        if (not self.virtual or
-                order_state.id not in self.pending_orders or
+        if (order_state.id not in self.pending_orders or
                 order_state.status != 'done'):
             return
 
         pending = self.pending_orders.pop(order_state.id)
         self.done_orders[order_state.id] = order_state
+        if not self.virtual:
+            return
+
+        log.info("Updating virtual balance from order %s. " 
+                 "Waiting a few seconds to ensure that balance is refreshed...",
+                 order_state.id)
+        time.sleep(10)
+
         bc, qc = order_state.product_id.split('-', 1)
+        prev_bc, prev_qc = self.balance[bc], self.balance[qc]
 
         if order_state.side == 'buy':
             refund = pending.captured - order_state.executed_value - order_state.fill_fees
@@ -298,30 +323,74 @@ class Account:
             self.balance[bc] += order_state.size - order_state.filled_size
             self.balance[qc] += order_state.executed_value - order_state.fill_fees
 
+        bc_delta = self.balance[bc] - prev_bc
+        qc_delta = self.balance[qc] - prev_qc
+        bc_sign = '+' if bc_delta >= 0 else '-'
+        qc_sign = '-' if qc_delta >= 0 else '-'
+
+        log.info("Updated virtual balance for %s. %s: %s%s, %s: %s%s. "
+                 "Order details: %s",
+                 self.name,
+                 bc, bc_sign, bc_delta,
+                 qc, qc_sign, qc_delta,
+                 order_state)
+
         self.balance[bc] = max(self.balance[bc], D(0))
         self.balance[qc] = max(self.balance[qc], D(0))
 
-    def get_order(self, order_id: str) -> Union[OrderState, None]:
-        r = self.exchange.auth.get_order(order_id)
-        self._handle_errors(r)
-        order_state = OrderState(r)
-        self._update_balance_from_order(order_state)
+    def get_order(self, order_id: str, ttl=60) -> Union[OrderState, None]:
+        log.info("Getting order %s...", order_id)
+        elapsed = 0
+        start_ts = time.time()
+        order_state = None
+        attempt = 0
+        while elapsed < ttl:
+            log.info("Getting order %s (attempt %s)...", order_id, attempt)
+            attempt += 1
+            r = self.exchange.auth.get_order(order_id)
+            log.debug("Get order %s reply: %s", order_id, r)
+            try:
+                self._handle_errors(r)
+            except OrderNotFound:
+                log.info("Trying to get order %s, but server could "
+                         "not find it. Will keep retrying for %s seconds...",
+                         order_id, ttl - elapsed)
+            else:
+                order_state = OrderState(r)
+                self._update_balance_from_order(order_state)
+                break
+
+            time.sleep(2)
+            elapsed = time.time() - start_ts
+
         return order_state
 
     def cancel_order(self, order_id):
         log.debug("Cancelling order %s...", order_id)
-        r = self.exchange.auth.cancel_order(order_id)
-        try:
-            self._handle_errors(r)
-        except OrderNotFound:
-            pass
-        if order_id in self.pending_orders:
-            order_state = self._wait_for_order(order_id, ttl=30)
-            if order_state is not None:
-                self._update_balance_from_order(order_state)
-        log.debug("Cancel order %s reply: %s", order_id, r)
+        ttl = 60
+        elapsed = 0
+        start_ts = time.time()
+        order_state = None
+        while elapsed < ttl:
+            r = self.exchange.auth.cancel_order(order_id)
+            log.debug("Cancel order %s reply: %s", order_id, r)
+            try:
+                self._handle_errors(r)
+            except OrderNotFound:
+                log.info("Trying to cancel pending order %s, but server could "
+                         "not find it. Will keep retrying for %s seconds...",
+                         order_id, ttl - elapsed)
+            else:
+                if order_id in self.pending_orders:
+                    order_state = self.wait_for_order(order_id, ttl=30)
+                    if order_state is not None:
+                        self._update_balance_from_order(order_state)
+                break
 
-        return r
+            time.sleep(2)
+            elapsed = time.time() - start_ts
+
+        return order_state
 
     def _handle_errors(self, reply: Dict[str, str]):
         if reply is None:
@@ -379,8 +448,8 @@ class Account:
                           self.unconfirmed_orders)
                 del self.unconfirmed_orders[:]
             self.unconfirmed_orders.append(active)
-            log.debug("Added order %s to unconfirmed orders list...",
-                      order_to_dict(order))
+            log.debug("Added %s order %s to unconfirmed orders list: %s",
+                      order.type, order.id, order_to_dict(order))
             self.save_state()
             r = action(**order_dict)
             order.raw_server_reply = r
@@ -394,6 +463,7 @@ class Account:
                     active.order_state = order_state
                     self.pending_orders[order_state.id] = active
                 else:
+                    log.warning("Order was not placed!")
                     self.balance[active.currency] += active.captured
             self.save_state()
 

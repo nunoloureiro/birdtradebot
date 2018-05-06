@@ -101,9 +101,7 @@ def convert_gdax_order_to_bitfinex(gdax_order):
     if 'price' in gdax_order:
         order['price'] = gdax_order['price']
     post_only = gdax_order.get('post_only')
-    params = {
-        'is_hidden': True
-    }
+    params = {}
     if order_type == 'limit' and post_only:
         params['is_postonly'] = True
 
@@ -168,23 +166,8 @@ class GDAXInterfaceAdapter:
     def get_accounts(self):
         r = self.bitfinex.fetch_balance()
         currencies = r['info']
-        gdax_currencies = {
-                'BTC': False,
-                'BCH': False,
-                'ETH': False,
-                'LTC': False,
-                'EUR': False,
-                'USD': False,
-        }
         for c in currencies:
             c['currency'] = c['currency'].upper()
-            if c['currency'] in gdax_currencies:
-                gdax_currencies[c['currency']] = True
-
-        for currency, found in gdax_currencies.items():
-            if not found:
-                currencies.append({'currency': currency, 'available': '0.0'})
-
         return currencies
 
     @handle_errors

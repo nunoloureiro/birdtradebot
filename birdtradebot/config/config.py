@@ -69,17 +69,17 @@ for rule in slow_bird_eth_rules:
 
 # Accounts
 accounts = {
-    'bird_eth_gdax': {
+    'eth_gdax': {
         'exchange': 'gdax',
         'initial_balance': {'EUR': 0, 'ETH': 0.1},
         'rules': bird_eth_rules,
     },
-    'bird_eth_bitfinex': {
+    'eth_bitfinex': {
         'exchange': 'bitfinex',
         'initial_balance': {'EUR': 0, 'ETH': 0.1},
         'rules': bird_eth_rules,
     },
-    'slow_bird_eth_bitfinex': {
+    'slow_eth_bitfinex': {
         'exchange': 'bitfinex',
         'initial_balance': {'EUR': 0, 'ETH': 0.1},
         'rules': slow_bird_eth_rules,

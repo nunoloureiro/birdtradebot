@@ -33,7 +33,7 @@ import twython
 import logging
 
 logging.basicConfig(
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    format='%(asctime)s - %(threadName)s - %(name)s - %(levelname)s - %(message)s',
     level=logging.DEBUG)
 log = logging.getLogger(__name__)
 log.setLevel(logging.DEBUG)
@@ -77,6 +77,7 @@ PRICE_PRECISION = {
     'BTC-EUR': 2,
     'ETH-BTC': 5,
     'IOT-USD': 4,
+    'EOS-ETH': 6,
 }
 
 
@@ -171,12 +172,15 @@ def calc_buy_size(account: Account, pair: Pair,
     else:
         max_account_buy_size = account.balance[quote_currency] / price
 
-        size = eval(pair.rule.order_template.size.format(
-            inside_ask=ask,
-            inside_bid=bid,
-            balance=account.balance,
-            max_account_buy_size=max_account_buy_size,
-        ))
+        if isinstance(pair.rule.order_template.size, Decimal):
+            size = pair.rule.order_template.size
+        else:
+            size = eval(pair.rule.order_template.size.format(
+                inside_ask=ask,
+                inside_bid=bid,
+                balance=account.balance,
+                max_account_buy_size=max_account_buy_size,
+            ))
 
     return D(round_down(size))
 
@@ -184,12 +188,16 @@ def calc_buy_size(account: Account, pair: Pair,
 def calc_sell_size(account: Account, pair: Pair, ask, bid):
     base_currency = pair.base_currency
     max_account_sell_size = account.balance[base_currency]
-    size = eval(pair.rule.order_template.size.format(
-        inside_ask=ask,
-        inside_bid=bid,
-        balance=account.balance,
-        max_account_sell_size=max_account_sell_size,
-    ))
+
+    if isinstance(pair.rule.order_template.size, Decimal):
+        size = pair.rule.order_template.size
+    else:
+        size = eval(pair.rule.order_template.size.format(
+            inside_ask=ask,
+            inside_bid=bid,
+            balance=account.balance,
+            max_account_sell_size=max_account_sell_size,
+        ))
 
     return D(round_down(size))
 
@@ -221,7 +229,7 @@ def new_order(account: Account, pair: Pair,
         raise ValueError("Unrecognized order side: %s", template.side)
 
     order_dict['size'] = str(size)
-    log.info("Order built: %s", order_dict)
+    log.info("%s order built: %s", order_dict['type'], order_dict)
 
     return Order(order_dict)
 
@@ -234,20 +242,21 @@ def place_orders(action: Callable, orders: OrderBatch) -> OrderBatch:
         try:
             order_state: OrderState = action(order)
         except InsufficientFunds:
-            log.error('Could not place order due to insufficient funds: %s',
-                      order_to_dict(order))
+            log.error('Could not place %s order due to insufficient funds: %s',
+                      order.type, order_to_dict(order))
             order.error = InsufficientFunds
             orders.error.append(order)
         except OrderSizeTooSmall:
-            log.error('Could not place order because size is too small: %s',
-                      order_to_dict(order))
+            log.error('Could not place %s order because size is too small: %s',
+                      order.type, order_to_dict(order))
             order.error = OrderSizeTooSmall
             orders.error.append(order)
         except OrderError as oe:
-            log.error("Order error %s: %s", oe, order_to_dict(order))
+            log.error("%s order error %s: %s", order.type, oe, order_to_dict(order))
             order.error = OrderError
             orders.error.append(order)
         else:
+            log.info("New order successfully created with id %s", order_state.id)
             if order_state.status == 'done':
                 orders.done.append(order_state)
             else:
@@ -276,7 +285,7 @@ def check_pending_orders(account: Account, orders: OrderBatch) -> OrderBatch:
             else:
                 orders.pending.append(state)
 
-        time.sleep(0.25)
+        time.sleep(0.5)
 
     return orders
 
@@ -318,6 +327,11 @@ def split_and_place_limit_order(account: Account, pair: Pair,
                                 orders: OrderBatch) -> OrderBatch:
 
     main_order = new_order(account, pair)
+    if main_order.size == D(0):
+        log.warning("Will not place limit order with size 0: %s",
+                    order_to_dict(main_order))
+        return
+
     if pair.size == D(0):
         pair.size = main_order.size
 
@@ -341,37 +355,49 @@ def split_and_place_limit_order(account: Account, pair: Pair,
 
 
 def check_error_orders(account: Account, pair: Pair, orders: OrderBatch):
-    insufficient_funds = False
+    err = None
     for order in orders.error:
-        if order.error in (InsufficientFunds, OrderSizeTooSmall):
-            log.warning("Insufficient funds to place order: %s",
+        if order.error == InsufficientFunds:
+            log.warning("Insufficient funds to place order. %s",
                         order_to_dict(order))
-            insufficient_funds = True
+            err = InsufficientFunds
+        elif order.error == OrderSizeTooSmall:
+            log.warning("Order size is too small: %s. %s",
+                        order.size, order_to_dict(order))
+            err = OrderSizeTooSmall
         else:
-            log.warning("Error in order %s. Cancelling. %s",
-                        order.id, order_to_dict(order))
+            log.warning("Will try to cancel order: %s", order_to_dict(order))
             try:
-                account.cancel_order(order.id)
-            except OrderNotFound:
+                order_id = order.id
+            except AttributeError:
                 pass
             else:
-                order = wait_for_order_to_complete(account, order)
-                if order is not None:
-                    pair.update_balance(order)
+                account.cancel_order(order_id)
+                order_state = account.wait_for_order(order_id)
+                if order_state is not None:
+                    pair.update_balance(order_state)
 
     del orders.error[:]
 
-    return insufficient_funds
+    return err
 
 
 def check_done_orders(pair: Pair, orders: OrderBatch):
+    too_many_errors = False
     for order in orders.done:
         log.info("Order is done: %s", order_to_dict(order))
         pair.update_balance(order)
         if not order.settled:
-            log.warning("Order done but not settled: %s", order.id)
+            log.warning("Order %s is done but not settled.", order.id)
+            pair.errors += 1
+            if pair.errors > 3:
+                log.warning("Too many errors for pair %s. Bailing.",
+                            pair.product_id)
+                too_many_errors = True
 
     del orders.done[:]
+
+    return too_many_errors
 
 
 def place_limit_order(account: Account, pair: Pair):
@@ -379,12 +405,17 @@ def place_limit_order(account: Account, pair: Pair):
     orders.pending = pair.pending_orders
     orders = check_pending_orders(account, orders)
     orders = check_expired_orders(orders, pair.rule.order_ttl)
-    check_done_orders(pair, orders)
+    too_many_errors = check_done_orders(pair, orders)
     check_error_orders(account, pair, orders)
 
     if pair.size != 0 and pair.filled_size >= pair.size:
         pair.status = 'done'
         pair.settled = True
+    elif too_many_errors:
+        pair.status = 'done'
+        pair.settled = False
+
+    if pair.status == 'done':
         return
 
     if orders.pending:
@@ -394,33 +425,16 @@ def place_limit_order(account: Account, pair: Pair):
 
     # New orders
     orders = split_and_place_limit_order(account, pair, orders)
-    nofunds = check_error_orders(account, pair, orders)
-    # If we are getting insufficient funds errors, it is better to just stop
-    # trying to place additional orders.
-    if nofunds:
+    if orders is None:
         pair.status = 'done'
         pair.settled = False
+        return
 
-
-def wait_for_order_to_complete(account: Account, order: OrderState) -> OrderState:
-    order_id = order.id
-    ttl = 30
-    sleep_for = 0.5
-    ttl_range = int(ttl / sleep_for)
-    order = None
-    for i in range(ttl_range):
-        log.debug("Waiting for order %s to complete...", order_id)
-        try:
-            order = account.get_order(order_id)
-        except OrderNotFound:
-            log.error("Could not find order on server!: %s",
-                      order_to_dict(order))
-        else:
-            if order is not None and order.status == 'done':
-                break
-        time.sleep(sleep_for)
-
-    return order
+    err = check_error_orders(account, pair, orders)
+    if err in (InsufficientFunds, OrderSizeTooSmall):
+        pair.status = 'done'
+        pair.settled = False
+        return
 
 
 def place_market_order(account: Account, pair: Pair):
@@ -437,7 +451,7 @@ def place_market_order(account: Account, pair: Pair):
 
     if orders.pending:
         order_state = orders.pending[0]
-        order_state = wait_for_order_to_complete(account, order_state)
+        order_state = account.wait_for_order(order_state.id)
         if order_state is not None:
             pair.settled = order_state.settled
             if order_state.status != 'done':
@@ -452,9 +466,9 @@ def place_market_order(account: Account, pair: Pair):
         try:
             order_state = handle_insufficient_funds(account, order)
         except OrderError:
-            log.warning("Order error: %s", order_to_dict(order))
+            log.warning("market order error: %s", order_to_dict(order))
         else:
-            order_state = wait_for_order_to_complete(account, order_state)
+            order_state = account.wait_for_order(order_state.id)
             if order_state is not None:
                 pair.settled = order_state.settled
                 if order_state.settled:
@@ -482,14 +496,10 @@ def update_account_position(account: Account, pairs: Set[str],
         update_pair_position(account, pair)
         if pair.status == 'done':
             for order in pair.pending_orders:
-                try:
-                    account.cancel_order(order.id)
-                except OrderNotFound:
-                    pass
-                else:
-                    order_state = wait_for_order_to_complete(account, order)
-                    if order_state is not None:
-                        pair.update_balance(order_state)
+                account.cancel_order(order.id)
+                order_state = account.wait_for_order(order.id)
+                if order_state is not None:
+                    pair.update_balance(order_state)
 
             del pair.pending_orders[:]
             pairs.remove(product_id)
@@ -536,7 +546,7 @@ def update_accounts_positions(accounts: Dict[str, Account], q: queue.Queue):
                 if not pairs[account.name]:
                     del pairs[account.name]
 
-        time.sleep(10)
+        time.sleep(20)
 
 
 def update_pair_position(account: Account, pair: Pair):
@@ -552,15 +562,18 @@ def update_pair_position(account: Account, pair: Pair):
         # If we reach here, then the limit order was _not_ settled.
         # Check if we should try using a market order as fallback.
         if pair.status == 'done' or int(time.time()) > pair.expiration:
-            if not pair.rule.market_fallback:
-                return
             # Before placing a market order, ensure no pending orders exist
             for order in pair.pending_orders:
                 account.cancel_order(order.id)
-                order = wait_for_order_to_complete(account, order)
+                order = account.wait_for_order(order.id)
                 if order is not None:
                     if order.status == 'done':
                         pair.update_balance(order)
+            del pair.pending_orders[:]
+
+            if not pair.rule.market_fallback:
+                return
+ 
             pair.rule.market_fallback = False
             market_order = True
 
@@ -678,6 +691,7 @@ def trade_loop(app_state: AppState, accounts: Dict[str, Account], twitter_client
     q = queue.Queue()
     t = threading.Thread(target=update_accounts_positions,
                          args=(accounts, q))
+    t.name = "OrderDispatcher"
     t.daemon = True
     t.start()
 
