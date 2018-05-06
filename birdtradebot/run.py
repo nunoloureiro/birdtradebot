@@ -636,6 +636,9 @@ class TradingStateMachine:
         for pair in self.account.pairs.values():
             if pair.status != 'done' and (stepnum == 0 or pair.updated):
                 pair.updated = False
+                log.debug("Notifying OrderDispatcher that new orders are "
+                          "available for %s:%s",
+                          self.account.name, pair.product_id)
                 self.queue.put((self.account.name, pair.product_id))
 
     def _update_pairs(self, tweet: Tweet):
