@@ -264,7 +264,7 @@ class Account:
             for o in self.exchange.auth.get_closed_orders(since, product_id)
         ]
 
-    def wait_for_order(self, _id: str, ttl: int) -> Union[OrderState, None]:
+    def wait_for_order(self, _id: str, ttl: int=0) -> Union[OrderState, None]:
         log.info("Waiting for order %s to complete...", _id)
         order_state = None
         start_ts = time.time()
@@ -333,7 +333,7 @@ class Account:
                  self.name,
                  bc, bc_sign, bc_delta,
                  qc, qc_sign, qc_delta,
-                 order_state)
+                 order_to_dict(order_state))
 
         self.balance[bc] = max(self.balance[bc], D(0))
         self.balance[qc] = max(self.balance[qc], D(0))
@@ -448,8 +448,8 @@ class Account:
                           self.unconfirmed_orders)
                 del self.unconfirmed_orders[:]
             self.unconfirmed_orders.append(active)
-            log.debug("Added %s order %s to unconfirmed orders list: %s",
-                      order.type, order.id, order_to_dict(order))
+            log.debug("Added %s order to unconfirmed orders list: %s",
+                      order.type, order_to_dict(order))
             self.save_state()
             r = action(**order_dict)
             order.raw_server_reply = r
