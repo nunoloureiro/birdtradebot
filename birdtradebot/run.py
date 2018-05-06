@@ -638,8 +638,6 @@ class TradingStateMachine:
                 pair.updated = False
                 self.queue.put((self.account.name, pair.product_id))
 
-        self.has_run = True
-
     def _update_pairs(self, tweet: Tweet):
         log.debug("Got the following tweet: %s" % tweet.text)
 
