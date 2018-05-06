@@ -326,7 +326,7 @@ class Account:
         bc_delta = self.balance[bc] - prev_bc
         qc_delta = self.balance[qc] - prev_qc
         bc_sign = '+' if bc_delta >= 0 else '-'
-        qc_sign = '-' if qc_delta >= 0 else '-'
+        qc_sign = '+' if qc_delta >= 0 else '-'
 
         log.info("Updated virtual balance for %s. %s: %s%s, %s: %s%s. "
                  "Order details: %s",
@@ -430,6 +430,9 @@ class Account:
             self.balance[base_currency] -= capture
         else:
             raise ValueError('Order side is invalid: %s', order_to_dict(order))
+
+        log.info('Captured %s %s on account %s',
+                 captured[1], captured[0], self.name)
 
         return captured
 
