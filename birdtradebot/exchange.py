@@ -118,7 +118,7 @@ class Pair:
         self.filled_size = D(0)
         self.executed_value = D(0)
         self.rule: Rule = None
-        self.status: str = None
+        self.status: str = 'done'
         self.settled: bool = False
         self.position = None
         self.expiration: int = 0
@@ -169,8 +169,6 @@ class Pair:
                         "Tweet date: %s, Tweet handle: %s, order: %s",
                         tweet.created, tweet.handle,
                         order_to_dict(rule.order_template))
-            self.status = 'done'
-            self.settled = False
             return
 
         log.info("Updating pair %s with tweet id: %s, tweet text: %s",
@@ -468,7 +466,9 @@ class Account:
                     active.order_state = order_state
                     self.pending_orders[order_state.id] = active
                 else:
-                    log.warning("Order was not placed!")
+                    log.warning("Order was not placed. "
+                                "Returning %s %s to account %s",
+                                active.captured, active.currency, self.name)
                     self.balance[active.currency] += active.captured
             self.save_state()
 
