@@ -264,7 +264,7 @@ class Account:
             for o in self.exchange.auth.get_closed_orders(since, product_id)
         ]
 
-    def wait_for_order(self, _id: str, ttl: int=0) -> Union[OrderState, None]:
+    def wait_for_order(self, _id: str, ttl: int=60) -> Union[OrderState, None]:
         log.info("Waiting for order %s to complete...", _id)
         order_state = None
         start_ts = time.time()

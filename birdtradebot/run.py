@@ -312,8 +312,8 @@ def check_expired_orders(orders: OrderBatch, ttl: int) -> OrderBatch:
 
     for order in pending:
         if order.timestamp + ttl > now:
-            log.debug("Order still valid. expiry: %d > now: %s",
-                      order.timestamp + ttl, now)
+            log.debug("Order %s is still valid. expiry: %d > now: %s",
+                      order.id, order.timestamp + ttl, now)
             orders.pending.append(order)
             continue
 
