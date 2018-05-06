@@ -162,9 +162,22 @@ class Pair:
 
         log.info("Updating pair %s based on new tweet info: %s, position: %s",
                  self.product_id, tweet.text, tweet.position)
+
         now = int(time.time())
+        if now > tweet.created_ts + rule.tweet_ttl:
+            log.warning("Advice is from an expired tweet. Ignoring... "
+                        "Tweet date: %s, Tweet handle: %s, order: %s",
+                        tweet.created, tweet.handle,
+                        order_to_dict(rule.order_template))
+            self.status = 'done'
+            self.settled = False
+            return
+
+        log.info("Updating pair %s with tweet id: %s, tweet text: %s",
+                 self.product_id, tweet.id, tweet.text)
         self.updated = True
         self.errors = 0
+        self.previous = None
         self.previous = deepcopy(self)
         self.rule = rule
         self.expiration = now + rule.ttl
@@ -174,17 +187,6 @@ class Pair:
         self.status = None
         self.position = None
         self.settled = False
-
-        if now > tweet.created_ts + rule.tweet_ttl:
-            log.warning("Got new advice from an expired tweet. Ignoring... "
-                        "Tweet date: %s, order: %s", tweet.created,
-                        order_to_dict(rule.order_template))
-            self.status = 'done'
-            self.settled = False
-            return
-
-        log.info("Updating pair %s with tweet id: %s, tweet text: %s",
-                 self.product_id, tweet.id, tweet.text)
 
 
 class Account:
