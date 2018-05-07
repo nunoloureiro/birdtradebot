@@ -105,7 +105,7 @@ PRICE_PRECISION = {
     'BTC-EUR': 2,
     'ETH-BTC': 5,
     'IOT-USD': 4,
-    'EOS-ETH': 5,
+    'EOS-ETH': 6,
 }
 
 
