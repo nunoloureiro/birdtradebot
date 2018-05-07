@@ -57,9 +57,10 @@ class Order:
         self.client_oid = None
 
     def _validate(self):
-        '''Validate order; follow https://docs.gdax.com/#orders for
-        filling in default values.'''
-
+        """
+        Validate order; follow https://docs.gdax.com/#orders for
+        filling in default values.
+        """
         unrecognized_keys = [
             key for key in self.order_dict if key not in order_vocab
         ]

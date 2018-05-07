@@ -86,12 +86,12 @@ class Exchange:
 
     def create_client_oid(self):
         return None
-        if self.type == 'gdax':
-            return None  # str(uuid.uuid4())
-        elif self.type == 'bitfinex':
-            return str(uuid.uuid1().int >> 64)
-        else:
-            return None
+        #if self.type == 'gdax':
+        #    return None  # str(uuid.uuid4())
+        #elif self.type == 'bitfinex':
+        #    return str(uuid.uuid1().int >> 64)
+        #else:
+        #    return None
 
 
 class AccountState:

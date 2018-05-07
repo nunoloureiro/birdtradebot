@@ -324,7 +324,7 @@ def check_expired_orders(orders: OrderBatch, ttl: int) -> OrderBatch:
 
 
 def split_and_place_limit_order(account: Account, pair: Pair,
-                                orders: OrderBatch) -> OrderBatch:
+                                orders: OrderBatch) -> Union[None, OrderBatch]:
 
     main_order = new_order(account, pair)
     if main_order.size == D(0):
