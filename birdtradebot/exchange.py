@@ -274,9 +274,8 @@ class Account:
             try:
                 order_state = self.get_order(_id, ttl=ttl)
             except OrderNotFound as onf:
-                log.error("Server said order %s was not found: %s "
-                          "This should have not happened.", _id, onf)
-                break
+                log.error("Order %s was not found: %s", _id, onf)
+                return None
             except OrderError as oerr:
                 log.error("Unspecified error while trying to fetch order "
                           "%s: %s", _id, oerr)
@@ -294,8 +293,22 @@ class Account:
 
             time.sleep(2)
             elapsed = time.time() - start_ts
+            log.debug("elapsed: %s, ttl: %s", elapsed, ttl)
 
         return order_state
+
+    def _refund_captured(self, active: ActiveOrder):
+        if active is None:
+            log.error("Trying to refund balance from a null active order!")
+            return
+        log.warning("Returning %s %s to account %s",
+                    active.captured, active.currency, self.name)
+        self.balance[active.currency] += active.captured
+
+        if active.order_state is not None:
+            order_id = active.order_state.id
+            log.info("Removing order %s from pending orders...", order_id)
+            del self.pending_orders[order_id]
 
     def _update_balance_from_order(self, order_state: OrderState):
         if (order_state.id not in self.pending_orders or
@@ -338,8 +351,17 @@ class Account:
         self.balance[bc] = max(self.balance[bc], D(0))
         self.balance[qc] = max(self.balance[qc], D(0))
 
+    def _restore_order_timestamp(self, order_state: OrderState):
+        active_order = self.pending_orders.get(order_state.id)
+        if active_order is not None:
+            order_state.timestamp = active_order.timestamp
+        else:
+            log.info("Order %s is not active. Keeping original timestamp...",
+                     order_state.id)
+        return order_state
+
     def get_order(self, order_id: str, ttl=60) -> Union[OrderState, None]:
-        log.info("Getting order %s...", order_id)
+        log.info("Getting order %s (ttl: %s)...", order_id, ttl)
         elapsed = 0
         start_ts = time.time()
         order_state = None
@@ -357,6 +379,7 @@ class Account:
                          order_id, ttl - elapsed)
             else:
                 order_state = OrderState(r)
+                order_state = self._restore_order_timestamp(order_state)
                 self._update_balance_from_order(order_state)
                 break
 
@@ -390,6 +413,13 @@ class Account:
             time.sleep(2)
             elapsed = time.time() - start_ts
 
+        if order_state is None and self.exchange.type == 'gdax':
+            # On GDAX, if an order is cancelled before being filled, the server
+            # will report it as "not found". We should refund the captured
+            # balance as it was not used.
+            active = self.pending_orders.get(order_id)
+            self._refund_captured(active)
+
         return order_state
 
     def _handle_errors(self, reply: Dict[str, str]):
@@ -404,7 +434,7 @@ class Account:
             raise InsufficientFunds(msg)
         elif 'order size is too small' in msg:
             raise OrderSizeTooSmall(msg)
-        elif 'not found' in msg:
+        elif 'not found' in msg or 'notfound' in msg:
             raise OrderNotFound(msg)
         else:
             raise OrderError(msg)
@@ -458,6 +488,7 @@ class Account:
             order.raw_server_reply = r
             self._handle_errors(r)
             order_state = OrderState(r)
+            order_state = self._restore_order_timestamp(order_state)
         finally:
             if self.unconfirmed_orders:
                 active = self.unconfirmed_orders.pop()
@@ -466,10 +497,7 @@ class Account:
                     active.order_state = order_state
                     self.pending_orders[order_state.id] = active
                 else:
-                    log.warning("Order was not placed. "
-                                "Returning %s %s to account %s",
-                                active.captured, active.currency, self.name)
-                    self.balance[active.currency] += active.captured
+                    self._refund_captured(active)
             self.save_state()
 
         return order_state
