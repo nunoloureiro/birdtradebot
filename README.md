@@ -13,7 +13,7 @@ You'll need some keys and secrets and passcodes from Twitter and GDAX and set th
 1. Open a new browser tab, and use it to [create a new Twitter app](https://apps.twitter.com/) after logging into Twitter. Name and describe it however you like, and specify no callback URL, but note Twitter also requires you enter some well-formed website URL to finish the process. You're allowed to write something like `https://placeholder.com/placeholder`. The thing will complain if your description isn't long enough, too. So dumb.
 2. Click the `Keys and Access Tokens` tab.
 3. Click `Create my access token`. The tab should now display a consumer key, a consumer secret, an access token, and an access token secret. Leave this tab be for now.
-4. Open a new browser tab, and use it to [visit GDAX](https://gdax.com). Log in, click your avatar on the upper right, and click `API`.
+4. Open a new browser tab, and use it to [visit GDAX](https://gdax.com). Log in, click your avatar on the upper right, and click `API`. Alternatively, you can also use [Bitfinex](https://www.bitfinex.com/).
 5. Create an API key with permissions to view and trade. You should now see a key, secret, and passphrase. Don't close the tab, or you'll lose the secret forever---which isn't the end of the world; you'll just have to regenerate an API key.
 
 ## Install and configure `birdtradebot`
@@ -24,7 +24,7 @@ $ cd birdtradebot
 $ pip install ccxt
 $ python setup.py install
 ```
-2. Configure `birdtradebot`. Use [`config/config.py`](config/config.py) for guidance.
+2. Configure `birdtradebot`. Use [`config.py`](birdtradebot/config/config.py) for guidance.
     * `handles`: a list of the Twitter handles to which the rule should apply, where commas are interpreted as logical ORs. At least one of `handles` or `keywords` must be specified in a rule. However, nothing is stopping you from passing an empty list, which `birdtradebot` interprets as no filter---but do this at your own peril.
     * `keywords`: a list of keywords from tweets to which the rule should apply, where commas are interpreted as logical ORs. If both `handles` and `keyword` are specified, there's a logical OR between the two lists as well.
     * `order`: the order to place whenever a rule matches. It is a dictionary of HTTP request parameters for an order as described in the [GDAX docs](https://docs.gdax.com/#orders). `birdtradebot` respects default values of parameters given there if any are left out in a given rule. Some details on particular keys from the `order` dictionary:
