@@ -56,7 +56,7 @@ class Exchange:
             raise ValueError('GDAX exchange requires the "passphrase" attribute')
 
         self.taker_fee = exchanges[self.type].get('taker_fee', D(0))
-        self.maker_fee = exchanges[self.type].get('marker_fee', D(0))
+        self.maker_fee = exchanges[self.type].get('maker_fee', D(0))
         self.auth = exchanges[self.type]['auth'](key, secret, passphrase)
 
         public = exchanges[self.type].get('public')
