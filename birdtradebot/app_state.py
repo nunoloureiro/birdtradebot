@@ -5,8 +5,8 @@ import jsonpickle
 
 from typing import Dict
 
-from twitter import TwitterState
-from exchange import AccountState
+from .twitter import TwitterState
+from .exchange import AccountState
 
 log = logging.getLogger(__name__)
 

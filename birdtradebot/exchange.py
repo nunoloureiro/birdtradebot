@@ -8,8 +8,9 @@ from typing import Dict, List, Union, Callable
 
 import gdax
 
-from exchanges import bitfinex
-from order import (
+from .exchanges import bitfinex
+
+from .order import (
     Order,
     OrderState,
     ActiveOrder,
@@ -18,9 +19,9 @@ from order import (
     OrderSizeTooSmall,
     OrderNotFound,
     order_to_dict)
-from rule import Rule
-from twitter import Tweet
-from utils import round_down, D
+from .rule import Rule
+from .twitter import Tweet
+from .utils import round_down, D
 
 log = logging.getLogger(__name__)
 

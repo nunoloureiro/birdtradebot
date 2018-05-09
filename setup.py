@@ -1,7 +1,7 @@
 from setuptools import setup
 
 setup(name='birdtradebot',
-      version='0.3.0',
+      version='0.4.0',
       description='trade crypto-currencies based on tweets',
       url='https://github.com/nunoloureiro/birdtradebot',
       download_url='https://github.com/nunoloureiro/birdtradebot/tarball/0.3.0',
@@ -9,12 +9,22 @@ setup(name='birdtradebot',
       author_email='joao@probely.com, nuno@probely.com',
       license='MIT',
       packages=['birdtradebot'],
-      package_data={'birdtradebot': ['*.py', './config/*']},
-      zip_safe=True,
+      package_data={'birdtradebot': ['*.py', './config/*', './exchanges/*']},
+      zip_safe=False,
       install_requires=[
           'twython', 'gdax', 'ccxt', 'python-dateutil', 'jsonpickle',
+          'sortedcontainers'
       ],
-      keywords=['bitcoin', 'btc', 'ethereum', 'eth', 'twitter'],
+      dependency_links=[
+          "https://github.com/poupas/gdax-python/tarball/master#egg=gdax-2.18.4"
+      ],
+      entry_points={
+          'console_scripts': [
+              'birdtradebot=birdtradebot.run:main',
+          ]
+      },
+      keywords=['bitcoin', 'btc', 'ethereum', 'eth', 'twitter',
+                'gdax', 'bitfinex'],
       classifiers=[
           'Programming Language :: Python :: 3',
           'Intended Audience :: Developers',
@@ -22,5 +32,5 @@ setup(name='birdtradebot',
           'Operating System :: MacOS',
           'Operating System :: Unix',
           'Topic :: Utilities'
-        ]
-    )
+      ]
+)

@@ -5,7 +5,7 @@ from typing import Dict, List, Union
 
 import dateutil.parser
 
-from utils import D
+from .utils import D
 
 order_vocab = frozenset([
     'client_oid', 'type', 'side', 'product_id', 'stp',

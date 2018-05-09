@@ -1,7 +1,7 @@
 from typing import Dict, List
 
-from utils import prettify_dict, D
-from order import OrderTemplate
+from .utils import prettify_dict, D
+from .order import OrderTemplate
 
 
 class Rule:

@@ -46,19 +46,19 @@ loggers = [
 for l in loggers:
     logging.getLogger(l).setLevel(logging.WARNING)
 
-from utils import round_down, D, split_amount
-from exchange import (
+from .utils import round_down, D, split_amount
+from .exchange import (
     Account,
     AccountState,
     Pair,
     Exchange)
-from rule import Rule
-from twitter import Tweet, TwitterState
-from app_state import (
+from .rule import Rule
+from .twitter import Tweet, TwitterState
+from .app_state import (
     load_app_state,
     save_app_state,
     AppState)
-from order import (
+from .order import (
     Order,
     OrderState,
     OrderTemplate,
@@ -731,7 +731,12 @@ def trade_loop(app_state: AppState, accounts: Dict[str, Account], twitter_client
 
 
 def trade(args):
-    from config import config
+    from imp import load_source
+    try:
+        config = load_source('config', args.config)
+    except IOError as e:
+        e.message = 'Cannot find or access rules file "%s"' % args.config
+        raise
 
     try:
         # Saved application state
@@ -873,24 +878,10 @@ def main():
 
     # Add command-line arguments
     trade_parser.add_argument(
-        '--profile', '-p', type=str, required=False, default='default',
-        help='which profile to use for trading'
-    )
-    trade_parser.add_argument(
         '--config', '-c', type=str, required=False,
         default=os.path.join(os.path.dirname(os.path.realpath(__file__)),
                              'config', 'config.py'),
-        help=('config file; this is Python that sets the variable "config" '
-              'to a list of dictionaries')
-    )
-    trade_parser.add_argument(
-        '--interval', '-i', type=float, required=False, default=905,
-        help=('how long to wait (in s) before reattempting to connect '
-              'after getting rate-limited')
-    )
-    trade_parser.add_argument(
-        '--sleep', '-s', type=float, required=False, default=0.5,
-        help='how long to wait (in s) after an order has been placed'
+        help=('config file; exchange and twitter credentials, and trade rules')
     )
     trade_parser.add_argument(
         '--state', type=str, required=False, default='state.dat',
