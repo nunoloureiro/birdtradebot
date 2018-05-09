@@ -354,10 +354,12 @@ class Account:
     def _restore_order_timestamp(self, order_state: OrderState):
         active_order = self.pending_orders.get(order_state.id)
         if active_order is not None:
+            if active_order.timestamp is None:
+                active_order.timestamp = int(time.time())
             order_state.timestamp = active_order.timestamp
         else:
-            log.info("Order %s is not active. Keeping original timestamp...",
-                     order_state.id)
+            log.info("Order %s is not active. Keeping original timestamp: %s",
+                     order_state.id, order_state.timestamp)
         return order_state
 
     def get_order(self, order_id: str, ttl=60) -> Union[OrderState, None]:

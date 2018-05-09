@@ -166,7 +166,7 @@ class ActiveOrder:
         self.status = None
         self.currency = currency
         self.captured = captured
-        self.timestamp = int(time.time())
+        self.timestamp = None
 
 
 def order_to_dict(order: Order, strict=False) -> Dict[str, str]:
