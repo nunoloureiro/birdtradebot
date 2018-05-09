@@ -24,7 +24,7 @@ $ cd birdtradebot
 $ pip install ccxt
 $ python setup.py install
 ```
-2. Configure `birdtradebot`. Use [`birdtradebot/config/config.py`](config/config.py) for guidance.
+2. Configure `birdtradebot`. Use [`config.py`](birdtradebot/config/config.py) for guidance.
     * `handles`: a list of the Twitter handles to which the rule should apply, where commas are interpreted as logical ORs. At least one of `handles` or `keywords` must be specified in a rule. However, nothing is stopping you from passing an empty list, which `birdtradebot` interprets as no filter---but do this at your own peril.
     * `keywords`: a list of keywords from tweets to which the rule should apply, where commas are interpreted as logical ORs. If both `handles` and `keyword` are specified, there's a logical OR between the two lists as well.
     * `order`: the order to place whenever a rule matches. It is a dictionary of HTTP request parameters for an order as described in the [GDAX docs](https://docs.gdax.com/#orders). `birdtradebot` respects default values of parameters given there if any are left out in a given rule. Some details on particular keys from the `order` dictionary:
