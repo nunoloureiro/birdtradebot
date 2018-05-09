@@ -20,7 +20,8 @@ You'll need some keys and secrets and passcodes from Twitter and GDAX and set th
 1. Clone the repo and then run the following commands:
 ```bash
 $ cd birdtradebot
-$ pip install .
+# Install ccxt explicitly to speed up installation
+$ pip install ccxt
 $ python setup.py install
 ```
 2. Configure `birdtradebot`. Use [`config/config.py`](config/config.py) for guidance.
@@ -33,7 +34,7 @@ $ python setup.py install
 With the default rules, you split your available fiat funds to buy ETH and BTC when @birdpersonborg goes long, and you sell all the ETH and BTC you can when @birdpersonborg goes short.
 3. Run
 ```bash
-birdtradebot trade --config <config file>
+$ birdtradebot trade --config <config file>
 ```
 
 ## Contributing
