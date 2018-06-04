@@ -137,7 +137,7 @@ class Pair:
 
     def update(self, rule: Rule, tweet: Tweet):
         our_tweet = self.twitter.get(tweet.handle)
-        if our_tweet is not None and tweet.id <= our_tweet.id:
+        if our_tweet is not None and tweet.id <= int(our_tweet.id):
             log.info("Saved tweet id is more recent than new tweet id (%s >= %s). "
                      "Handle: %s. Text: %s. Date: %s",
                      our_tweet.id, tweet.id, tweet.handle, tweet.text,

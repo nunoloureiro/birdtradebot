@@ -680,10 +680,11 @@ def get_tweets(twitter_client, handles, twitter_state: TwitterState) -> List[Twe
                 break
             for t in raw_tweets:
                 tweet = Tweet(t)
-                if latest_id is None or tweet.id > latest_id:
+                if latest_id is None or tweet.id > int(latest_id):
                     latest_id = tweet.id
                 twitter_state.update(tweet)
                 tweets.append(tweet)
+            log.info("Latest id is: %s", latest_id)
 
     return tweets
 
