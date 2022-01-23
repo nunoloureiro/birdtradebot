@@ -1,0 +1,40 @@
+{
+	"target_id": "2Ghoakvm6yuh",
+	
+	"auth": {
+		"has_sequence_login": true,
+		"sequence_id": "3idNcSgzX3Ly",
+	},
+	
+	"partial-scan": {
+		"enabled": true,
+		"subscopes": [
+			{
+				"url": "https://birdtradebot.com/configure/*",
+			},
+			{
+				"url": "https://birdtradebot.com/exchanges/*"
+			}
+				
+		]
+	},
+	
+	"scan_profile": "normal",
+	
+	"extra_hosts": [
+		{ 
+			"host": "api.birdtradebot.com" 
+		}
+	],
+	
+	"headers": [
+		{
+			"name":"X-Scanner-Auth",
+			"value":"05e8405e1074356cb700147d0fc7526f98d16d56"
+		}
+	]
+}
+
+
+
+
